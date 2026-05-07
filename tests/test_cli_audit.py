@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from argparse import Namespace
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -10,7 +11,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from ntu_mail_forward.cli import audit_forward, cleanup_expired
+from ntu_mail_forward.cli import audit_forward, cleanup_expired, run
 from ntu_mail_forward.classifier import Classifier, load_rules
 from ntu_mail_forward.state import MailRecord, MailState, load_state
 
@@ -24,9 +25,16 @@ class FakePOP3:
         data = self.messages[number].as_bytes()
         return b"+OK", data.splitlines(), len(data)
 
+    def top(self, number: int, _lines: int) -> tuple[bytes, list[bytes], int]:
+        data = self.messages[number].as_bytes()
+        return b"+OK", data.splitlines(), len(data)
+
     def dele(self, number: int) -> tuple[bytes, list[bytes], int]:
         self.deleted.append(number)
         return b"+OK", [], 0
+
+    def quit(self) -> None:
+        pass
 
 
 class FakeSMTP:
@@ -83,6 +91,7 @@ class AuditForwardIntegrationTest(unittest.TestCase):
             )
             state = load_state(state_file)
             audit_csv_exists = audit_csv.exists()
+            audit_rows = audit_csv.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(code, 0)
         self.assertEqual(len(smtp.sent), 1)
@@ -91,6 +100,7 @@ class AuditForwardIntegrationTest(unittest.TestCase):
         self.assertEqual(state.records["uid-junk"].decision, "junk")
         self.assertTrue(state.records["uid-forward"].delete_after)
         self.assertTrue(audit_csv_exists)
+        self.assertEqual(len(audit_rows), 3)
 
     def test_audit_forward_skips_processed_messages(self) -> None:
         pop3 = FakePOP3({1: make_message("postmaster@ntu.edu.tw", "Account notice")})
@@ -143,6 +153,33 @@ class AuditForwardIntegrationTest(unittest.TestCase):
         self.assertTrue(saved.records["expired"].deleted_at)
         self.assertFalse(saved.records["future"].deleted_at)
         self.assertTrue(saved.records["missing"].deleted_at)
+
+    def test_dry_run_does_not_load_classifier_rules(self) -> None:
+        fake_pop3 = FakePOP3({1: make_message("sender@example.com", "hello")})
+        args = Namespace(
+            env_file=Path("missing.env"),
+            state_file=Path("missing-state.json"),
+            init=False,
+            forward=False,
+            audit_forward=False,
+            cleanup_expired=False,
+            dry_run=True,
+            limit=1,
+            retention_days=30,
+            audit_csv=Path("audit.csv"),
+            classifier_rules=Path("missing-rules.json"),
+        )
+
+        with patch("ntu_mail_forward.cli.parse_args", return_value=args), patch(
+            "ntu_mail_forward.cli.connect_pop3", return_value=fake_pop3
+        ), patch(
+            "ntu_mail_forward.cli.fetch_uid_map", return_value={1: "uid1"}
+        ), patch(
+            "ntu_mail_forward.cli.load_state", return_value=MailState(records={})
+        ), redirect_stdout(StringIO()):
+            code = run()
+
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

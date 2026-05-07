@@ -4,13 +4,13 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.example.ntu-mail-forward</string>
+  <string>com.example.ntu-mail-forward.audit</string>
 
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd "$HOME/path/to/ntu-mail-forward" &amp;&amp; mkdir -p .local/logs &amp;&amp; /usr/bin/python3 -m ntu_mail_forward.cli --forward</string>
+    <string>cd "$HOME/path/to/ntu-mail-forward" &amp;&amp; mkdir -p .local/logs &amp;&amp; /usr/bin/python3 -m ntu_mail_forward.cli --audit-forward</string>
   </array>
 
   <key>StartInterval</key>
@@ -20,9 +20,9 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/Users/example/path/to/ntu-mail-forward/.local/logs/ntu-mail-forward.out.log</string>
+  <string>/Users/example/path/to/ntu-mail-forward/.local/logs/ntu-mail-forward-audit.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/example/path/to/ntu-mail-forward/.local/logs/ntu-mail-forward.err.log</string>
+  <string>/Users/example/path/to/ntu-mail-forward/.local/logs/ntu-mail-forward-audit.err.log</string>
 </dict>
 </plist>

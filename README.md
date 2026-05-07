@@ -67,9 +67,12 @@ NTU_TEST_SMTP=1 python3 tests/probe_pop3_smtp.py
 
 ## macOS LaunchAgent
 
-Use `launchd/com.personal-automation.ntu-mail-forward.example.plist` as the tracked public template.
+Use these tracked public templates:
 
-Create a local real plist at `launchd/com.personal-automation.ntu-mail-forward.plist`. It is gitignored because it contains machine-specific paths. For this machine, the real plist assumes this repo lives at:
+- `launchd/com.personal-automation.ntu-mail-forward.example.plist` for frequent audit/forward runs.
+- `launchd/com.personal-automation.ntu-mail-forward-cleanup.example.plist` for daily expired-message cleanup.
+
+Create local real plists under `launchd/` without the `.example` suffix. They are gitignored because they contain machine-specific paths. For this machine, the real plists assume this repo lives at:
 
 ```text
 ~/git/personal/ntu-mail-forward
@@ -81,6 +84,8 @@ Install it:
 mkdir -p ~/Library/LaunchAgents
 cp launchd/com.personal-automation.ntu-mail-forward.plist ~/Library/LaunchAgents/
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.personal-automation.ntu-mail-forward.plist
+cp launchd/com.personal-automation.ntu-mail-forward-cleanup.plist ~/Library/LaunchAgents/
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.personal-automation.ntu-mail-forward-cleanup.plist
 ```
 
 Logs are written under `.local/logs/`.

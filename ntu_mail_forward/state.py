@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,7 +51,7 @@ def load_state(path: Path) -> MailState:
     data = json.loads(path.read_text(encoding="utf-8"))
     if "records" in data:
         records = {
-            uid: MailRecord(**{"uid": uid, **record})
+            uid: _mail_record_from_payload(uid, record)
             for uid, record in data.get("records", {}).items()
         }
         return MailState(records=records, updated_at=str(data.get("updated_at", "")))
@@ -90,3 +90,15 @@ def _record_payload(record: MailRecord) -> dict[str, object]:
     payload = asdict(record)
     payload.pop("uid", None)
     return payload
+
+
+def _mail_record_from_payload(uid: str, payload: object) -> MailRecord:
+    if not isinstance(payload, dict):
+        return MailRecord(uid=uid)
+    field_names = {field.name for field in fields(MailRecord)}
+    record_data = {
+        key: value
+        for key, value in payload.items()
+        if key in field_names and key != "uid"
+    }
+    return MailRecord(uid=uid, **record_data)

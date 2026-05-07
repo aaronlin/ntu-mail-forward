@@ -36,6 +36,28 @@ class StateTest(unittest.TestCase):
         self.assertEqual(state.records["u1"].decision, "forward")
         self.assertEqual(state.records["u1"].reason, "important cue: ntu")
 
+    def test_ignores_unknown_record_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "records": {
+                            "u1": {
+                                "decision": "forward",
+                                "future_field": "new value",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            state = load_state(path)
+
+        self.assertEqual(state.records["u1"].uid, "u1")
+        self.assertEqual(state.records["u1"].decision, "forward")
+
 
 if __name__ == "__main__":
     unittest.main()

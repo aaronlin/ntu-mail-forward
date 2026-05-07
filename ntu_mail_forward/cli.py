@@ -107,7 +107,6 @@ def run() -> int:
     if args.retention_days < 0:
         raise SystemExit("--retention-days must be 0 or greater.")
 
-    classifier = Classifier(load_rules(args.classifier_rules))
     state = load_state(args.state_file)
     pop3 = connect_pop3()
     try:
@@ -123,6 +122,7 @@ def run() -> int:
             return cleanup_expired(pop3, uid_map, state, args.state_file, args.audit_csv)
 
         if args.audit_forward:
+            classifier = Classifier(load_rules(args.classifier_rules))
             return audit_forward(
                 pop3,
                 uid_map,
@@ -237,12 +237,12 @@ def audit_forward(
             state.records[uid] = record
             rows.append(record)
             counts[record.decision] += 1
+            save_state(state_file, state)
+            append_audit_csv(audit_csv, [record])
     finally:
         if smtp is not None:
             smtp.quit()
 
-    save_state(state_file, state)
-    append_audit_csv(audit_csv, rows)
     print(
         "Audit-forward summary: "
         f"forwarded={counts[FORWARD]}, junk={counts[JUNK]}, "
