@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ntu_mail_forward.cli import audit_forward, cleanup_expired
+from ntu_mail_forward.classifier import Classifier, load_rules
 from ntu_mail_forward.state import MailRecord, MailState, load_state
 
 
@@ -76,9 +77,10 @@ class AuditForwardIntegrationTest(unittest.TestCase):
                     MailState(records={}),
                     state_file,
                     audit_csv,
-                    limit=None,
-                    retention_days=30,
-                )
+                limit=None,
+                retention_days=30,
+                classifier=Classifier(load_rules()),
+            )
             state = load_state(state_file)
             audit_csv_exists = audit_csv.exists()
 
@@ -107,6 +109,7 @@ class AuditForwardIntegrationTest(unittest.TestCase):
                     Path(tmp) / "audit.csv",
                     limit=None,
                     retention_days=30,
+                    classifier=Classifier(load_rules()),
                 )
 
         self.assertEqual(code, 0)

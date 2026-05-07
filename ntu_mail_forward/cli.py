@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
-from .classifier import ERROR, FORWARD, JUNK, classify_message
+from .classifier import DEFAULT_RULES_FILE, ERROR, FORWARD, JUNK, Classifier, load_rules
 from .config import DEFAULT_ENV_FILE, DEFAULT_STATE_FILE, load_env_file
 from .mailbox import (
     build_forward,
@@ -80,6 +80,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_STATE_FILE.parent / "audit.csv",
         help="CSV path for audit-forward and cleanup summaries.",
     )
+    parser.add_argument(
+        "--classifier-rules",
+        type=Path,
+        default=DEFAULT_RULES_FILE,
+        help="JSON classifier rules file.",
+    )
     return parser.parse_args()
 
 
@@ -101,6 +107,7 @@ def run() -> int:
     if args.retention_days < 0:
         raise SystemExit("--retention-days must be 0 or greater.")
 
+    classifier = Classifier(load_rules(args.classifier_rules))
     state = load_state(args.state_file)
     pop3 = connect_pop3()
     try:
@@ -124,6 +131,7 @@ def run() -> int:
                 args.audit_csv,
                 args.limit,
                 args.retention_days,
+                classifier,
             )
 
         unseen_items = [
@@ -166,6 +174,7 @@ def audit_forward(
     audit_csv: Path,
     limit: int | None,
     retention_days: int,
+    classifier: Classifier | None = None,
 ) -> int:
     items = [
         (number, uid)
@@ -180,6 +189,7 @@ def audit_forward(
         print(f"No unprocessed mail. Skipped {skipped} already processed message(s).")
         return 0
 
+    classifier = classifier or Classifier()
     smtp = None
     rows: list[MailRecord] = []
     counts: Counter[str] = Counter(skipped=skipped)
@@ -191,7 +201,7 @@ def audit_forward(
             ).isoformat()
             try:
                 original = fetch_message(pop3, number)
-                classification = classify_message(original)
+                classification = classifier.classify(original)
                 record = _record_from_message(
                     uid,
                     number,

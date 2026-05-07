@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from email.message import EmailMessage
 
-from ntu_mail_forward.classifier import FORWARD, JUNK, classify_message
+from ntu_mail_forward.classifier import (
+    FORWARD,
+    JUNK,
+    Classifier,
+    classify_message,
+    load_rules,
+)
 
 
 def message(
@@ -130,6 +138,35 @@ class ClassifierTest(unittest.TestCase):
             message("Giloo 紀實影音 <edm@giloo.ist>", "【新片上架】石黑一雄小說改編")
         )
         self.assertEqual(result.decision, FORWARD)
+
+    def test_custom_rules_file_can_override_sender_preferences(self) -> None:
+        with TemporaryDirectory() as tmp:
+            rules_file = Path(tmp) / "rules.json"
+            rules_file.write_text(
+                """
+{
+  "important_header_terms": [],
+  "junk_terms": [],
+  "promo_senders": [],
+  "always_forward_senders": ["custom-keep.example"],
+  "always_forward_subjects": [],
+  "always_junk_senders": ["custom-junk.example"],
+  "ignore_patterns": [],
+  "sender_content_rules": [],
+  "bulk_headers": []
+}
+""".strip(),
+                encoding="utf-8",
+            )
+            classifier = Classifier(load_rules(rules_file))
+            self.assertEqual(
+                classifier.classify(message("a@custom-keep.example", "hello")).decision,
+                FORWARD,
+            )
+            self.assertEqual(
+                classifier.classify(message("a@custom-junk.example", "hello")).decision,
+                JUNK,
+            )
 
 
 if __name__ == "__main__":

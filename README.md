@@ -51,6 +51,13 @@ Adjust retention:
 python3 -m ntu_mail_forward.cli --audit-forward --retention-days 30
 ```
 
+Classifier rules are stored in `classifier_rules.json`. Tune the sender, subject,
+and term lists there for another mailbox, or point at a different rules file:
+
+```sh
+python3 -m ntu_mail_forward.cli --audit-forward --classifier-rules my-rules.json
+```
+
 Test POP3 and optionally SMTP login:
 
 ```sh
