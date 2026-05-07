@@ -1,0 +1,160 @@
+{
+  "important_header_terms": [
+    "ntu",
+    "national taiwan university",
+    "台大",
+    "臺大",
+    "professor",
+    "department",
+    "admin",
+    "academic",
+    "seminar",
+    "conference",
+    "bank",
+    "statement",
+    "invoice",
+    "receipt",
+    "payment",
+    "transaction",
+    "security",
+    "verification",
+    "verify",
+    "password",
+    "security alert",
+    "action needed",
+    "government",
+    "immigration",
+    "flight",
+    "itinerary",
+    "interview",
+    "application",
+    "cfp:",
+    "shipment",
+    "delivery"
+  ],
+  "junk_terms": [
+    "marketing",
+    "newsletter",
+    "unsubscribe",
+    "cash back",
+    "coupon",
+    "discount",
+    "sale",
+    "promo",
+    "promotion",
+    "limited time",
+    "last chance",
+    "deal",
+    "deals",
+    "reward",
+    "points",
+    "shopping",
+    "cart",
+    "retail",
+    "旅遊優惠",
+    "優惠",
+    "折扣",
+    "回饋",
+    "購物"
+  ],
+  "promo_senders": [
+    "rakuten",
+    "shopback",
+    "uniqlo",
+    "gu taiwan",
+    "pinkoi",
+    "booking.com",
+    "yelp",
+    "packt",
+    "lomography",
+    "zeczec",
+    "nova",
+    "nanit",
+    "garmin",
+    "gopro",
+    "cole haan",
+    "ikea",
+    "watsons",
+    "trip.com",
+    "accupass",
+    "maxmypoint",
+    "synology",
+    "quantopian",
+    "hihibox",
+    "hsbc taiwan",
+    "jr九州",
+    "jrkyushu",
+    "instapaper"
+  ],
+  "always_forward_senders": [
+    "initium.com",
+    "theinitium.com",
+    "giloo"
+  ],
+  "always_forward_subjects": [
+    "電子發票核對與中獎確認通知"
+  ],
+  "always_junk_senders": [
+    "hsbc taiwan",
+    "jr九州",
+    "jrkyushu",
+    "instapaper"
+  ],
+  "ignore_patterns": [
+    {
+      "sender": "accounts.google.com",
+      "subject": "security alert",
+      "reason": "review preference: already delivered to Gmail"
+    },
+    {
+      "sender": "postmaster@ntu.edu.tw",
+      "subject": "垃圾信隔離通知",
+      "reason": "review preference: ignore NTU spam quarantine notice"
+    },
+    {
+      "sender": "postmaster@ntu.edu.tw",
+      "subject": "spam quarantine notification",
+      "reason": "review preference: ignore NTU spam quarantine notice"
+    },
+    {
+      "sender": "atcoder.jp",
+      "reason": "review preference: ignore AtCoder"
+    }
+  ],
+  "sender_content_rules": [
+    {
+      "sender": "turbotax",
+      "forward_subject_terms": [
+        "last chance",
+        "deadline",
+        "due",
+        "file by",
+        "final notice",
+        "important notice",
+        "account needs to be activated",
+        "avoid extra charges"
+      ],
+      "junk_terms": [
+        "expert",
+        "cash back",
+        "save ",
+        "savings",
+        "discount",
+        "offer",
+        "deal",
+        "bigger tax savings"
+      ],
+      "forward_reason": "important cue: TurboTax reminder",
+      "junk_reason": "review preference: TurboTax promotional content",
+      "uncertain_reason": "uncertain TurboTax; forwarding to avoid false negative"
+    }
+  ],
+  "bulk_headers": [
+    "list-unsubscribe",
+    "list-id",
+    "precedence",
+    "x-campaign",
+    "x-mailgun",
+    "x-mc"
+  ]
+}

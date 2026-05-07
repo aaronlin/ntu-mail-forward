@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import poplib
 import smtplib
 import sys
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 
+from .classifier import DEFAULT_RULES_FILE, ERROR, FORWARD, JUNK, Classifier, load_rules
 from .config import DEFAULT_ENV_FILE, DEFAULT_STATE_FILE, load_env_file
 from .mailbox import (
     build_forward,
@@ -16,12 +21,19 @@ from .mailbox import (
     fetch_message,
     fetch_uid_map,
 )
-from .state import load_seen_uids, save_seen_uids
+from .state import (
+    MailRecord,
+    load_seen_uids,
+    load_state,
+    save_seen_uids,
+    save_state,
+    utc_now,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Forward unseen POP3 messages, then delete forwarded originals."
+        description="Audit NTU POP3 mail, forward important messages, and clean up after retention."
     )
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     parser.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE)
@@ -33,7 +45,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--forward",
         action="store_true",
-        help="Forward unseen messages, then delete them from POP3.",
+        help="Deprecated unsafe mode. Use --audit-forward instead.",
+    )
+    parser.add_argument(
+        "--audit-forward",
+        action="store_true",
+        help="Classify unprocessed messages, forward important/uncertain mail, and retain all originals.",
+    )
+    parser.add_argument(
+        "--cleanup-expired",
+        action="store_true",
+        help="Delete POP3 messages whose recorded retention period has expired.",
     )
     parser.add_argument(
         "--dry-run",
@@ -44,7 +66,25 @@ def parse_args() -> argparse.Namespace:
         "--limit",
         type=int,
         default=None,
-        help="Maximum number of unseen messages to process. Defaults to 2 for --dry-run and all for --forward.",
+        help="Maximum number of unseen messages to process. Defaults to 2 for --dry-run and all for --audit-forward.",
+    )
+    parser.add_argument(
+        "--retention-days",
+        type=int,
+        default=30,
+        help="Days to retain processed originals before --cleanup-expired may delete them.",
+    )
+    parser.add_argument(
+        "--audit-csv",
+        type=Path,
+        default=DEFAULT_STATE_FILE.parent / "audit.csv",
+        help="CSV path for audit-forward and cleanup summaries.",
+    )
+    parser.add_argument(
+        "--classifier-rules",
+        type=Path,
+        default=DEFAULT_RULES_FILE,
+        help="JSON classifier rules file.",
     )
     return parser.parse_args()
 
@@ -53,10 +93,21 @@ def run() -> int:
     args = parse_args()
     load_env_file(args.env_file)
 
-    if args.forward and args.dry_run:
-        raise SystemExit("Use only one of --forward or --dry-run.")
+    selected_modes = [
+        args.init,
+        args.forward,
+        args.audit_forward,
+        args.cleanup_expired,
+        args.dry_run,
+    ]
+    if sum(bool(mode) for mode in selected_modes) > 1:
+        raise SystemExit("Use only one action at a time.")
+    if args.forward:
+        raise SystemExit("Immediate-delete --forward is disabled. Use --audit-forward.")
+    if args.retention_days < 0:
+        raise SystemExit("--retention-days must be 0 or greater.")
 
-    seen_uids = load_seen_uids(args.state_file)
+    state = load_state(args.state_file)
     pop3 = connect_pop3()
     try:
         uid_map = fetch_uid_map(pop3)
@@ -67,10 +118,26 @@ def run() -> int:
             print(f"Initialized state with {len(current_uids)} existing message(s).")
             return 0
 
+        if args.cleanup_expired:
+            return cleanup_expired(pop3, uid_map, state, args.state_file, args.audit_csv)
+
+        if args.audit_forward:
+            classifier = Classifier(load_rules(args.classifier_rules))
+            return audit_forward(
+                pop3,
+                uid_map,
+                state,
+                args.state_file,
+                args.audit_csv,
+                args.limit,
+                args.retention_days,
+                classifier,
+            )
+
         unseen_items = [
             (number, uid)
             for number, uid in sorted(uid_map.items())
-            if uid not in seen_uids
+            if uid not in state.records
         ]
 
         limit = args.limit
@@ -81,7 +148,6 @@ def run() -> int:
 
         if not unseen_items:
             print("No unseen mail.")
-            save_seen_uids(args.state_file, seen_uids | current_uids)
             return 0
 
         print(f"Found {len(unseen_items)} unseen message(s):")
@@ -93,28 +159,200 @@ def run() -> int:
             print("Dry run only; no messages forwarded, deleted, or marked seen.")
             return 0
 
-        if not args.forward:
-            print("No action taken. Use --forward to forward and delete, or --dry-run to preview.")
-            return 0
-
-        smtp = connect_smtp()
-        forwarded_uids: set[str] = set()
-        try:
-            for number, uid in unseen_items:
-                original = fetch_message(pop3, number)
-                smtp.send_message(build_forward(original))
-                pop3.dele(number)
-                forwarded_uids.add(uid)
-                print(f"Forwarded and queued delete: {describe_message(number, uid, original)}")
-        finally:
-            smtp.quit()
-
-        save_seen_uids(args.state_file, seen_uids | forwarded_uids)
-        print(f"Forwarded {len(forwarded_uids)} message(s). POP3 deletes commit on QUIT.")
+        print("No action taken. Use --audit-forward to classify and forward, or --dry-run to preview.")
     finally:
         pop3.quit()
 
     return 0
+
+
+def audit_forward(
+    pop3: poplib.POP3_SSL,
+    uid_map: dict[int, str],
+    state,
+    state_file: Path,
+    audit_csv: Path,
+    limit: int | None,
+    retention_days: int,
+    classifier: Classifier | None = None,
+) -> int:
+    items = [
+        (number, uid)
+        for number, uid in sorted(uid_map.items())
+        if uid not in state.records
+    ]
+    skipped = len(uid_map) - len(items)
+    if limit is not None:
+        items = items[-limit:]
+
+    if not items:
+        print(f"No unprocessed mail. Skipped {skipped} already processed message(s).")
+        return 0
+
+    classifier = classifier or Classifier()
+    smtp = None
+    rows: list[MailRecord] = []
+    counts: Counter[str] = Counter(skipped=skipped)
+    try:
+        for number, uid in items:
+            now = utc_now()
+            delete_after = (
+                datetime.now(timezone.utc) + timedelta(days=retention_days)
+            ).isoformat()
+            try:
+                original = fetch_message(pop3, number)
+                classification = classifier.classify(original)
+                record = _record_from_message(
+                    uid,
+                    number,
+                    original,
+                    classification.decision,
+                    classification.reason,
+                    now,
+                    delete_after,
+                )
+                if classification.decision == FORWARD:
+                    if smtp is None:
+                        smtp = connect_smtp()
+                    smtp.send_message(build_forward(original))
+                    record.forwarded_at = utc_now()
+                    print(f"Forwarded: {describe_message(number, uid, original)}")
+                elif classification.decision == JUNK:
+                    print(f"Junk retained: {describe_message(number, uid, original)}")
+                else:
+                    record.decision = ERROR
+                    record.error = f"Unexpected decision: {classification.decision}"
+                    print(f"Error: {describe_message(number, uid, original)} | {record.error}")
+            except Exception as exc:
+                record = MailRecord(
+                    uid=uid,
+                    message_number=number,
+                    decision=ERROR,
+                    reason="processing error",
+                    processed_at=now,
+                    error=str(exc),
+                )
+                print(f"Error processing #{number} ({uid}): {exc}")
+
+            state.records[uid] = record
+            rows.append(record)
+            counts[record.decision] += 1
+            save_state(state_file, state)
+            append_audit_csv(audit_csv, [record])
+    finally:
+        if smtp is not None:
+            smtp.quit()
+
+    print(
+        "Audit-forward summary: "
+        f"forwarded={counts[FORWARD]}, junk={counts[JUNK]}, "
+        f"errors={counts[ERROR]}, skipped={counts['skipped']}"
+    )
+    print(f"Audit CSV: {audit_csv}")
+    return 0 if counts[ERROR] == 0 else 1
+
+
+def cleanup_expired(
+    pop3: poplib.POP3_SSL,
+    uid_map: dict[int, str],
+    state,
+    state_file: Path,
+    audit_csv: Path,
+) -> int:
+    uid_to_number = {uid: number for number, uid in uid_map.items()}
+    now = datetime.now(timezone.utc)
+    rows: list[MailRecord] = []
+    counts: Counter[str] = Counter()
+
+    for uid, record in sorted(state.records.items()):
+        if record.deleted_at or not record.delete_after:
+            continue
+        delete_after = _parse_datetime(record.delete_after)
+        if delete_after is None or delete_after > now:
+            continue
+        number = uid_to_number.get(uid)
+        if number is None:
+            record.deleted_at = utc_now()
+            record.error = "UID not present during cleanup; treated as already gone"
+            counts["missing"] += 1
+            rows.append(record)
+            continue
+        pop3.dele(number)
+        record.deleted_at = utc_now()
+        record.message_number = number
+        counts["deleted"] += 1
+        rows.append(record)
+        print(f"Deleted expired POP3 message #{number} ({uid})")
+
+    save_state(state_file, state)
+    if rows:
+        append_audit_csv(audit_csv, rows)
+    print(
+        "Cleanup summary: "
+        f"deleted={counts['deleted']}, missing={counts['missing']}, "
+        f"retained={len(state.records) - counts['deleted'] - counts['missing']}"
+    )
+    print("POP3 deletes commit on QUIT.")
+    return 0
+
+
+def _record_from_message(
+    uid: str,
+    number: int,
+    message: EmailMessage,
+    decision: str,
+    reason: str,
+    processed_at: str,
+    delete_after: str,
+) -> MailRecord:
+    return MailRecord(
+        uid=uid,
+        message_number=number,
+        sender=str(message.get("From", "")),
+        subject=str(message.get("Subject", "")),
+        date=str(message.get("Date", "")),
+        decision=decision,
+        reason=reason,
+        processed_at=processed_at,
+        delete_after=delete_after,
+    )
+
+
+def append_audit_csv(path: Path, rows: list[MailRecord]) -> None:
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exists = path.exists()
+    fieldnames = [
+        "uid",
+        "message_number",
+        "sender",
+        "subject",
+        "date",
+        "decision",
+        "reason",
+        "processed_at",
+        "forwarded_at",
+        "delete_after",
+        "deleted_at",
+        "error",
+    ]
+    with path.open("a", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        if not exists:
+            writer.writeheader()
+        for record in rows:
+            writer.writerow({name: getattr(record, name) for name in fieldnames})
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def main() -> None:

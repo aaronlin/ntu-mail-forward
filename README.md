@@ -26,10 +26,36 @@ Mark current mailbox contents as already seen without forwarding or deleting:
 python3 -m ntu_mail_forward.cli --init
 ```
 
-Forward unseen mail and delete successfully forwarded originals from NTU:
+Audit unseen mail, forward important or uncertain messages, and retain originals for
+30 days before cleanup can delete them:
 
 ```sh
-python3 -m ntu_mail_forward.cli --forward
+python3 -m ntu_mail_forward.cli --audit-forward
+```
+
+Process a smaller batch first:
+
+```sh
+python3 -m ntu_mail_forward.cli --audit-forward --limit 50
+```
+
+Delete only messages whose retention period has expired:
+
+```sh
+python3 -m ntu_mail_forward.cli --cleanup-expired
+```
+
+Adjust retention:
+
+```sh
+python3 -m ntu_mail_forward.cli --audit-forward --retention-days 30
+```
+
+Classifier rules are stored in `classifier_rules.json`. Tune the sender, subject,
+and term lists there for another mailbox, or point at a different rules file:
+
+```sh
+python3 -m ntu_mail_forward.cli --audit-forward --classifier-rules my-rules.json
 ```
 
 Test POP3 and optionally SMTP login:
@@ -41,9 +67,12 @@ NTU_TEST_SMTP=1 python3 tests/probe_pop3_smtp.py
 
 ## macOS LaunchAgent
 
-Use `launchd/com.personal-automation.ntu-mail-forward.example.plist` as the tracked public template.
+Use these tracked public templates:
 
-Create a local real plist at `launchd/com.personal-automation.ntu-mail-forward.plist`. It is gitignored because it contains machine-specific paths. For this machine, the real plist assumes this repo lives at:
+- `launchd/com.personal-automation.ntu-mail-forward.example.plist` for frequent audit/forward runs.
+- `launchd/com.personal-automation.ntu-mail-forward-cleanup.example.plist` for daily expired-message cleanup.
+
+Create local real plists under `launchd/` without the `.example` suffix. They are gitignored because they contain machine-specific paths. For this machine, the real plists assume this repo lives at:
 
 ```text
 ~/git/personal/ntu-mail-forward
@@ -55,6 +84,8 @@ Install it:
 mkdir -p ~/Library/LaunchAgents
 cp launchd/com.personal-automation.ntu-mail-forward.plist ~/Library/LaunchAgents/
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.personal-automation.ntu-mail-forward.plist
+cp launchd/com.personal-automation.ntu-mail-forward-cleanup.plist ~/Library/LaunchAgents/
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.personal-automation.ntu-mail-forward-cleanup.plist
 ```
 
 Logs are written under `.local/logs/`.
