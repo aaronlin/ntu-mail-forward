@@ -26,10 +26,29 @@ Mark current mailbox contents as already seen without forwarding or deleting:
 python3 -m ntu_mail_forward.cli --init
 ```
 
-Forward unseen mail and delete successfully forwarded originals from NTU:
+Audit unseen mail, forward important or uncertain messages, and retain originals for
+30 days before cleanup can delete them:
 
 ```sh
-python3 -m ntu_mail_forward.cli --forward
+python3 -m ntu_mail_forward.cli --audit-forward
+```
+
+Process a smaller batch first:
+
+```sh
+python3 -m ntu_mail_forward.cli --audit-forward --limit 50
+```
+
+Delete only messages whose retention period has expired:
+
+```sh
+python3 -m ntu_mail_forward.cli --cleanup-expired
+```
+
+Adjust retention:
+
+```sh
+python3 -m ntu_mail_forward.cli --audit-forward --retention-days 30
 ```
 
 Test POP3 and optionally SMTP login:
