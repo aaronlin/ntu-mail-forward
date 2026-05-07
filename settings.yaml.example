@@ -1,0 +1,9 @@
+accounts:
+  - name: primary
+    mail_user: your-ntu-username
+    mail_password: replace-with-password
+    forward_to: your-forward-address@example.com
+    pop3_host: msa.ntu.edu.tw
+    pop3_port: 995
+    smtp_host: smtps.ntu.edu.tw
+    smtp_port: 465

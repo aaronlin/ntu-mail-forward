@@ -6,12 +6,18 @@ import poplib
 import smtplib
 import sys
 from collections import Counter
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from io import StringIO
 from pathlib import Path
 
 from .classifier import DEFAULT_RULES_FILE, ERROR, FORWARD, JUNK, Classifier, load_rules
-from .config import DEFAULT_ENV_FILE, DEFAULT_STATE_FILE, load_env_file
+from .config import (
+    AccountConfig,
+    DEFAULT_SETTINGS_FILE,
+    load_settings_file,
+)
 from .mailbox import (
     build_forward,
     connect_pop3,
@@ -23,7 +29,6 @@ from .mailbox import (
 )
 from .state import (
     MailRecord,
-    load_seen_uids,
     load_state,
     save_seen_uids,
     save_state,
@@ -35,8 +40,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Audit NTU POP3 mail, forward important messages, and clean up after retention."
     )
-    parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
-    parser.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE)
     parser.add_argument(
         "--init",
         action="store_true",
@@ -75,12 +78,6 @@ def parse_args() -> argparse.Namespace:
         help="Days to retain processed originals before --cleanup-expired may delete them.",
     )
     parser.add_argument(
-        "--audit-csv",
-        type=Path,
-        default=DEFAULT_STATE_FILE.parent / "audit.csv",
-        help="CSV path for audit-forward and cleanup summaries.",
-    )
-    parser.add_argument(
         "--classifier-rules",
         type=Path,
         default=DEFAULT_RULES_FILE,
@@ -91,8 +88,6 @@ def parse_args() -> argparse.Namespace:
 
 def run() -> int:
     args = parse_args()
-    load_env_file(args.env_file)
-
     selected_modes = [
         args.init,
         args.forward,
@@ -107,31 +102,76 @@ def run() -> int:
     if args.retention_days < 0:
         raise SystemExit("--retention-days must be 0 or greater.")
 
-    state = load_state(args.state_file)
-    pop3 = connect_pop3()
+    return run_accounts(args)
+
+
+def run_accounts(args: argparse.Namespace) -> int:
+    accounts = load_settings_file(DEFAULT_SETTINGS_FILE)
+    failures = 0
+
+    for account in accounts:
+        buffer = StringIO()
+        code = 1
+        print(f"[{account.name}] Starting")
+        try:
+            with redirect_stdout(buffer):
+                code = run_single_account(args, account)
+        except Exception as exc:
+            print(f"[{account.name}] Error: {exc}")
+            failures += 1
+        else:
+            if code != 0:
+                failures += 1
+        finally:
+            for line in buffer.getvalue().splitlines():
+                print(f"[{account.name}] {line}")
+            print(f"[{account.name}] Finished with exit code {code}")
+
+    if failures:
+        print(f"Combined run complete: {failures} account(s) failed.")
+        return 1
+
+    print(f"Combined run complete: {len(accounts)} account(s) succeeded.")
+    return 0
+
+
+def run_single_account(args: argparse.Namespace, account: AccountConfig) -> int:
+    state_file = account.state_file
+    audit_csv = account.audit_csv
+    if state_file is None or audit_csv is None:
+        raise SystemExit("Missing state or audit path.")
+
+    state = load_state(state_file)
+    pop3 = connect_pop3(account)
     try:
         uid_map = fetch_uid_map(pop3)
         current_uids = set(uid_map.values())
 
         if args.init:
-            save_seen_uids(args.state_file, current_uids)
+            save_seen_uids(state_file, current_uids)
             print(f"Initialized state with {len(current_uids)} existing message(s).")
             return 0
 
         if args.cleanup_expired:
-            return cleanup_expired(pop3, uid_map, state, args.state_file, args.audit_csv)
+            return cleanup_expired(pop3, uid_map, state, state_file, audit_csv)
 
         if args.audit_forward:
-            classifier = Classifier(load_rules(args.classifier_rules))
+            rules_file = (
+                account.classifier_rules
+                if account.classifier_rules is not None
+                else args.classifier_rules
+            )
+            classifier = Classifier(load_rules(rules_file))
             return audit_forward(
                 pop3,
                 uid_map,
                 state,
-                args.state_file,
-                args.audit_csv,
+                state_file,
+                audit_csv,
                 args.limit,
                 args.retention_days,
                 classifier,
+                account,
             )
 
         unseen_items = [
@@ -175,6 +215,7 @@ def audit_forward(
     limit: int | None,
     retention_days: int,
     classifier: Classifier | None = None,
+    account: AccountConfig | None = None,
 ) -> int:
     items = [
         (number, uid)
@@ -213,8 +254,8 @@ def audit_forward(
                 )
                 if classification.decision == FORWARD:
                     if smtp is None:
-                        smtp = connect_smtp()
-                    smtp.send_message(build_forward(original))
+                        smtp = connect_smtp(account)
+                    smtp.send_message(build_forward(original, account))
                     record.forwarded_at = utc_now()
                     print(f"Forwarded: {describe_message(number, uid, original)}")
                 elif classification.decision == JUNK:

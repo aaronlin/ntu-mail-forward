@@ -7,9 +7,10 @@ forwards important or uncertain messages to Gmail through NTU SMTP, records the
 processing decision, and only deletes retained originals after their retention
 window expires.
 
-The code is intentionally dependency-light and currently uses the Python
-standard library only. There is no package manager metadata yet, so run commands
-from the repository root and invoke modules directly with `python3 -m ...`.
+The code is intentionally dependency-light. Runtime settings are read from YAML,
+so the Python used to run the app must have PyYAML available. There is no
+package manager metadata yet, so run commands from the repository root and
+invoke modules directly with `python3 -m ...`.
 
 ## Repository Layout
 
@@ -29,14 +30,22 @@ from the repository root and invoke modules directly with `python3 -m ...`.
 
 ## Local Files and Secrets
 
-- `.env.local` contains real account settings and must stay untracked. Do not
-  print or copy its secret values into logs, commits, issues, or PR text.
+- `settings.yaml` contains real account settings and must stay untracked. Do not
+  print or copy its secret values into logs, commits, issues, or PR text. Do not
+  recreate `.env.local`; the app reads `settings.yaml` by default.
 - `.local/` contains runtime state, logs, and audit CSV output. Treat it as
   local-only operational data, not source.
-- The default state file is `.local/pop3-state.json`; the default audit CSV is
-  `.local/audit.csv`.
+- Per-account state and audit files default under `.local/accounts/<name>/`.
 - The app uses POP3 UIDLs as stable message identities. Preserve that model when
   modifying processing or cleanup logic.
+- The installed LaunchAgents in `~/Library/LaunchAgents/` should be symlinks to
+  the real plist files under `launchd/`, not copied files. This keeps local
+  launchd config in sync with repo edits.
+- The local plist files use `/Users/aaron_lin/opt/anaconda3/bin/python3`
+  because `/usr/bin/python3` does not have PyYAML installed.
+- After changing loaded plist content, reload or kickstart the relevant
+  LaunchAgent if the running launchd job needs to pick up the change
+  immediately.
 
 ## Runtime Behavior
 
