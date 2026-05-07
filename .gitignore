@@ -1,0 +1,6 @@
+.env.local
+.local/
+launchd/com.personal-automation.ntu-mail-forward.plist
+__pycache__/
+*.py[cod]
+.DS_Store
