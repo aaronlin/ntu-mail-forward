@@ -11,8 +11,7 @@ from email.policy import default
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ntu_mail_forward.config import load_env_file, optional_env
-from ntu_mail_forward.config import DEFAULT_ENV_FILE, env
+from ntu_mail_forward.config import DEFAULT_SETTINGS_FILE, load_settings_file, optional_env
 from ntu_mail_forward.mailbox import connect_pop3, connect_smtp
 
 
@@ -38,18 +37,18 @@ def print_recent_headers(pop3: poplib.POP3_SSL, sample_count: int) -> None:
 
 
 def main() -> int:
-    load_env_file(DEFAULT_ENV_FILE)
-    sample_count = int(env("NTU_POP3_SAMPLE_COUNT", "5"))
+    account = load_settings_file(DEFAULT_SETTINGS_FILE)[0]
+    sample_count = int(optional_env("NTU_POP3_SAMPLE_COUNT") or "5")
 
-    pop3 = connect_pop3()
+    pop3 = connect_pop3(account)
     try:
-        print("POP3 login succeeded.")
+        print(f"POP3 login succeeded for account {account.name}.")
         print_recent_headers(pop3, sample_count)
     finally:
         pop3.quit()
 
     if optional_env("NTU_TEST_SMTP") == "1":
-        smtp = connect_smtp()
+        smtp = connect_smtp(account)
         try:
             print("\nSMTP login succeeded.")
         finally:

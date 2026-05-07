@@ -89,7 +89,8 @@
   "always_forward_senders": [
     "initium.com",
     "theinitium.com",
-    "giloo"
+    "giloo",
+    "slack.com"
   ],
   "always_forward_subjects": [
     "電子發票核對與中獎確認通知"

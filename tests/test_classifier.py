@@ -139,6 +139,17 @@ class ClassifierTest(unittest.TestCase):
         )
         self.assertEqual(result.decision, FORWARD)
 
+    def test_slack_notice_is_kept(self) -> None:
+        result = classify_message(
+            message(
+                "Slack <no-reply@slack.com>",
+                "Notice: Content older than one year will be deleted from your free workspace",
+                body="marketing sale",
+                headers={"List-Unsubscribe": "<mailto:unsubscribe@example.com>"},
+            )
+        )
+        self.assertEqual(result.decision, FORWARD)
+
     def test_custom_rules_file_can_override_sender_preferences(self) -> None:
         with TemporaryDirectory() as tmp:
             rules_file = Path(tmp) / "rules.json"

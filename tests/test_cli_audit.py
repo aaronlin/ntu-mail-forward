@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -156,30 +157,183 @@ class AuditForwardIntegrationTest(unittest.TestCase):
 
     def test_dry_run_does_not_load_classifier_rules(self) -> None:
         fake_pop3 = FakePOP3({1: make_message("sender@example.com", "hello")})
-        args = Namespace(
-            env_file=Path("missing.env"),
-            state_file=Path("missing-state.json"),
-            init=False,
-            forward=False,
-            audit_forward=False,
-            cleanup_expired=False,
-            dry_run=True,
-            limit=1,
-            retention_days=30,
-            audit_csv=Path("audit.csv"),
-            classifier_rules=Path("missing-rules.json"),
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            settings_file = Path(tmp) / "settings.yaml"
+            settings_file.write_text(
+                "\n".join(
+                    [
+                        "accounts:",
+                        "  - name: primary",
+                        "    mail_user: user1",
+                        "    mail_password: secret",
+                        "    forward_to: one@example.com",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = Namespace(
+                init=False,
+                forward=False,
+                audit_forward=False,
+                cleanup_expired=False,
+                dry_run=True,
+                limit=1,
+                retention_days=30,
+                classifier_rules=Path("missing-rules.json"),
+            )
 
-        with patch("ntu_mail_forward.cli.parse_args", return_value=args), patch(
-            "ntu_mail_forward.cli.connect_pop3", return_value=fake_pop3
-        ), patch(
-            "ntu_mail_forward.cli.fetch_uid_map", return_value={1: "uid1"}
-        ), patch(
-            "ntu_mail_forward.cli.load_state", return_value=MailState(records={})
-        ), redirect_stdout(StringIO()):
-            code = run()
+            with patch("ntu_mail_forward.cli.DEFAULT_SETTINGS_FILE", settings_file), patch(
+                "ntu_mail_forward.cli.parse_args", return_value=args
+            ), patch(
+                "ntu_mail_forward.cli.connect_pop3", return_value=fake_pop3
+            ), patch(
+                "ntu_mail_forward.cli.fetch_uid_map", return_value={1: "uid1"}
+            ), patch(
+                "ntu_mail_forward.cli.load_state", return_value=MailState(records={})
+            ), redirect_stdout(StringIO()):
+                code = run()
 
         self.assertEqual(code, 0)
+
+    def test_settings_file_audit_forward_processes_isolated_accounts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            global_rules = tmp_path / "global-rules.json"
+            secondary_rules = tmp_path / "secondary-rules.json"
+            global_rules.write_text(
+                json.dumps({"always_junk_senders": ["sender1@example.com"]}),
+                encoding="utf-8",
+            )
+            secondary_rules.write_text(
+                json.dumps({"always_forward_senders": ["sender2@example.com"]}),
+                encoding="utf-8",
+            )
+            settings_file = tmp_path / "settings.yaml"
+            settings_file.write_text(
+                "\n".join(
+                    [
+                        "accounts:",
+                        "  - name: primary",
+                        "    mail_user: user1",
+                        "    mail_password: secret1",
+                        "    forward_to: one@example.com",
+                        "    state_file: primary-state.json",
+                        "    audit_csv: primary-audit.csv",
+                        "  - name: secondary",
+                        "    mail_user: user2",
+                        "    mail_password: secret2",
+                        "    forward_to: two@example.com",
+                        "    classifier_rules: secondary-rules.json",
+                        "    state_file: secondary-state.json",
+                        "    audit_csv: secondary-audit.csv",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = Namespace(
+                init=False,
+                forward=False,
+                audit_forward=True,
+                cleanup_expired=False,
+                dry_run=False,
+                limit=None,
+                retention_days=30,
+                classifier_rules=global_rules,
+            )
+            pop3_by_account = {
+                "primary": FakePOP3({1: make_message("sender1@example.com", "Primary")}),
+                "secondary": FakePOP3({1: make_message("sender2@example.com", "Secondary")}),
+            }
+            uid_maps = {
+                id(pop3_by_account["primary"]): {1: "primary-uid"},
+                id(pop3_by_account["secondary"]): {1: "secondary-uid"},
+            }
+            smtp_by_account = {"primary": FakeSMTP(), "secondary": FakeSMTP()}
+
+            with patch("ntu_mail_forward.cli.DEFAULT_SETTINGS_FILE", settings_file), patch(
+                "ntu_mail_forward.cli.parse_args", return_value=args
+            ), patch(
+                "ntu_mail_forward.cli.connect_pop3",
+                side_effect=lambda account=None: pop3_by_account[account.name],
+            ), patch(
+                "ntu_mail_forward.cli.fetch_uid_map",
+                side_effect=lambda pop3: uid_maps[id(pop3)],
+            ), patch(
+                "ntu_mail_forward.cli.connect_smtp",
+                side_effect=lambda account=None: smtp_by_account[account.name],
+            ), redirect_stdout(StringIO()):
+                code = run()
+
+            primary_state = load_state(tmp_path / "primary-state.json")
+            secondary_state = load_state(tmp_path / "secondary-state.json")
+            primary_audit_exists = (tmp_path / "primary-audit.csv").exists()
+            secondary_audit_exists = (tmp_path / "secondary-audit.csv").exists()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(primary_state.records["primary-uid"].decision, "junk")
+        self.assertEqual(secondary_state.records["secondary-uid"].decision, "forward")
+        self.assertEqual(smtp_by_account["primary"].sent, [])
+        self.assertEqual(smtp_by_account["secondary"].sent[0]["To"], "two@example.com")
+        self.assertTrue(primary_audit_exists)
+        self.assertTrue(secondary_audit_exists)
+
+    def test_settings_file_continues_after_account_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            settings_file = tmp_path / "settings.yaml"
+            settings_file.write_text(
+                "\n".join(
+                    [
+                        "accounts:",
+                        "  - name: broken",
+                        "    mail_user: bad",
+                        "    mail_password: secret",
+                        "    forward_to: bad@example.com",
+                        "    state_file: broken-state.json",
+                        "    audit_csv: broken-audit.csv",
+                        "  - name: working",
+                        "    mail_user: good",
+                        "    mail_password: secret",
+                        "    forward_to: good@example.com",
+                        "    state_file: working-state.json",
+                        "    audit_csv: working-audit.csv",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = Namespace(
+                init=True,
+                forward=False,
+                audit_forward=False,
+                cleanup_expired=False,
+                dry_run=False,
+                limit=None,
+                retention_days=30,
+                classifier_rules=Path("unused-rules.json"),
+            )
+            working_pop3 = FakePOP3({})
+
+            def connect(account=None):
+                if account.name == "broken":
+                    raise OSError("login failed")
+                return working_pop3
+
+            with patch("ntu_mail_forward.cli.DEFAULT_SETTINGS_FILE", settings_file), patch(
+                "ntu_mail_forward.cli.parse_args", return_value=args
+            ), patch(
+                "ntu_mail_forward.cli.connect_pop3", side_effect=connect
+            ), patch(
+                "ntu_mail_forward.cli.fetch_uid_map", return_value={1: "working-uid"}
+            ), redirect_stdout(StringIO()):
+                code = run()
+
+            working_state = load_state(tmp_path / "working-state.json")
+
+        self.assertEqual(code, 1)
+        self.assertIn("working-uid", working_state.records)
 
 
 if __name__ == "__main__":
