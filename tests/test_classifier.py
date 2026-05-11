@@ -107,6 +107,7 @@ class ClassifierTest(unittest.TestCase):
 
     def test_reviewed_junk_senders_are_junk(self) -> None:
         samples = [
+            message("DH Express 通知 <noreply7@notification.io>", "📦 您的國際包裹需要通關 156369"),
             message("HSBC Taiwan <onlineservices@informationservices.hsbc.com.tw>", "母親節限定優惠"),
             message("JR九州 <webmaster@mail.jrkyushu.co.jp>", "会員さま限定プラン"),
             message("Instapaper <no-reply@instapaper.com>", "Instapaper Weekly"),

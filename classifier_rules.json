@@ -96,6 +96,7 @@
     "電子發票核對與中獎確認通知"
   ],
   "always_junk_senders": [
+    "dh express",
     "hsbc taiwan",
     "jr九州",
     "jrkyushu",
