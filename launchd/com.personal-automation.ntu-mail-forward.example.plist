@@ -8,9 +8,14 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
-    <string>-lc</string>
-    <string>cd "$HOME/path/to/ntu-mail-forward" &amp;&amp; mkdir -p .local/logs &amp;&amp; /path/to/python3 -m ntu_mail_forward.cli --audit-forward</string>
+    <string>/Users/example/path/to/ntu-mail-forward/launchd/run_with_error_email.sh</string>
+    <string>ntu-mail-forward-audit</string>
+    <string>/Users/example/path/to/ntu-mail-forward/.local/logs/ntu-mail-forward-audit.out.log</string>
+    <string>/Users/example/path/to/ntu-mail-forward/.local/logs/ntu-mail-forward-audit.err.log</string>
+    <string>/path/to/python3</string>
+    <string>-m</string>
+    <string>ntu_mail_forward.cli</string>
+    <string>--audit-forward</string>
   </array>
 
   <key>StartInterval</key>

@@ -78,7 +78,7 @@ class ClassifierTest(unittest.TestCase):
 
     def test_google_security_alert_is_ignored(self) -> None:
         result = classify_message(
-            message("Google <no-reply@accounts.google.com>", "Security alert for vagante@gmail.com")
+            message("Google <no-reply@accounts.google.com>", "Security alert for user@example.com")
         )
         self.assertEqual(result.decision, JUNK)
 

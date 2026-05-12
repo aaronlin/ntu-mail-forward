@@ -1,3 +1,6 @@
+error_notifications:
+  to: error-notifications@example.com
+
 accounts:
   - name: primary
     mail_user: your-ntu-username

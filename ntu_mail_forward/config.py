@@ -29,6 +29,11 @@ class AccountConfig:
     audit_csv: Path | None = None
 
 
+@dataclass(frozen=True)
+class ErrorNotificationConfig:
+    to: str
+
+
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
@@ -57,18 +62,7 @@ def optional_env(*names: str) -> str:
 
 
 def load_settings_file(path: Path = DEFAULT_SETTINGS_FILE) -> list[AccountConfig]:
-    if not path.exists():
-        raise SystemExit(
-            f"Missing settings file: {path}. Copy settings.yaml.example to settings.yaml."
-        )
-    try:
-        import yaml
-    except ImportError:
-        raise SystemExit("Missing dependency: install PyYAML to read settings.yaml.") from None
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise SystemExit(f"Invalid YAML in {path}: {exc}") from None
+    data = _load_settings_data(path)
     accounts = data.get("accounts") if isinstance(data, dict) else None
     if not isinstance(accounts, list) or not accounts:
         raise SystemExit(f"{path} must contain a non-empty accounts list.")
@@ -84,6 +78,39 @@ def load_settings_file(path: Path = DEFAULT_SETTINGS_FILE) -> list[AccountConfig
         names.add(account.name)
         loaded.append(account)
     return loaded
+
+
+def load_error_notifications(
+    path: Path = DEFAULT_SETTINGS_FILE,
+) -> ErrorNotificationConfig | None:
+    data = _load_settings_data(path)
+    payload = data.get("error_notifications") if isinstance(data, dict) else None
+    if payload in (None, ""):
+        return None
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{path} error_notifications must be an object.")
+    recipient = _string_value(payload.get("to"))
+    if not recipient:
+        return None
+    return ErrorNotificationConfig(to=recipient)
+
+
+def _load_settings_data(path: Path) -> dict[str, object]:
+    if not path.exists():
+        raise SystemExit(
+            f"Missing settings file: {path}. Copy settings.yaml.example to settings.yaml."
+        )
+    try:
+        import yaml
+    except ImportError:
+        raise SystemExit("Missing dependency: install PyYAML to read settings.yaml.") from None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"Invalid YAML in {path}: {exc}") from None
+    if not isinstance(data, dict):
+        raise SystemExit(f"{path} must contain a YAML object.")
+    return data
 
 
 load_accounts_file = load_settings_file
