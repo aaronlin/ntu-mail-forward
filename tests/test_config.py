@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ntu_mail_forward.config import load_settings_file
+from ntu_mail_forward.config import load_error_notifications, load_settings_file
 
 
 class SettingsFileTest(unittest.TestCase):
@@ -105,6 +105,52 @@ class SettingsFileTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit):
                 load_settings_file(Path(tmp) / "settings.yaml")
+
+    def test_loads_error_notification_recipient(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings_file = Path(tmp) / "settings.yaml"
+            settings_file.write_text(
+                "\n".join(
+                    [
+                        "error_notifications:",
+                        "  to: alerts@example.com",
+                        "accounts:",
+                        "  - name: primary",
+                        "    mail_user: user1",
+                        "    mail_password: secret",
+                        "    forward_to: one@example.com",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            notification = load_error_notifications(settings_file)
+
+        self.assertIsNotNone(notification)
+        assert notification is not None
+        self.assertEqual(notification.to, "alerts@example.com")
+
+    def test_missing_error_notification_recipient_is_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings_file = Path(tmp) / "settings.yaml"
+            settings_file.write_text(
+                "\n".join(
+                    [
+                        "accounts:",
+                        "  - name: primary",
+                        "    mail_user: user1",
+                        "    mail_password: secret",
+                        "    forward_to: one@example.com",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            notification = load_error_notifications(settings_file)
+
+        self.assertIsNone(notification)
 
 
 if __name__ == "__main__":

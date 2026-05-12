@@ -88,6 +88,17 @@ Relative paths are resolved from the settings file location. If `state_file` and
 .local/accounts/<name>/audit.csv
 ```
 
+To email yourself when a scheduled LaunchAgent run exits with an error, add a
+private notification recipient to your ignored local `settings.yaml`:
+
+```yaml
+error_notifications:
+  to: alerts@example.com
+```
+
+Failure notifications are sent through the first configured account's NTU SMTP
+settings.
+
 Test POP3 and optionally SMTP login:
 
 ```sh
@@ -127,3 +138,8 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.personal-automatio
 ```
 
 Logs are written under `.local/logs/`.
+
+The LaunchAgents call `launchd/run_with_error_email.sh`, which preserves the
+existing stdout/stderr logs and sends a notification email on any nonzero exit.
+After changing loaded plist content, reload or kickstart the relevant
+LaunchAgent so launchd picks up the new command.
