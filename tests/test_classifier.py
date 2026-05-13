@@ -111,8 +111,16 @@ class ClassifierTest(unittest.TestCase):
             message("HSBC Taiwan <onlineservices@informationservices.hsbc.com.tw>", "母親節限定優惠"),
             message("JR九州 <webmaster@mail.jrkyushu.co.jp>", "会員さま限定プラン"),
             message("Instapaper <no-reply@instapaper.com>", "Instapaper Weekly"),
+            message("特力屋 <service@trplus.com.tw>", "會員優惠通知"),
+            message("IFTTT <mail@ifttt.com>", "Your weekly activity"),
         ]
         self.assertTrue(all(classify_message(msg).decision == JUNK for msg in samples))
+
+    def test_reviewed_junk_subjects_are_junk(self) -> None:
+        result = classify_message(
+            message("info@point.recruit.co.jp", "リクルートID ログインのお知らせ")
+        )
+        self.assertEqual(result.decision, JUNK)
 
     def test_turbotax_uses_content_to_classify(self) -> None:
         self.assertEqual(

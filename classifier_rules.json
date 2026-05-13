@@ -100,7 +100,12 @@
     "hsbc taiwan",
     "jr九州",
     "jrkyushu",
-    "instapaper"
+    "instapaper",
+    "service@trplus.com.tw",
+    "mail@ifttt.com"
+  ],
+  "always_junk_subjects": [
+    "リクルートID"
   ],
   "ignore_patterns": [
     {
