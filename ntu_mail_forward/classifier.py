@@ -46,6 +46,7 @@ class ClassifierRules:
     always_forward_senders: tuple[str, ...] = ()
     always_forward_subjects: tuple[str, ...] = ()
     always_junk_senders: tuple[str, ...] = ()
+    always_junk_subjects: tuple[str, ...] = ()
     ignore_patterns: tuple[SenderSubjectRule, ...] = ()
     sender_content_rules: tuple[SenderContentRule, ...] = ()
     bulk_headers: tuple[str, ...] = ()
@@ -79,6 +80,15 @@ class Classifier:
             return Classification(
                 JUNK,
                 f"review preference: {', '.join(always_junk_matches[:2])}",
+            )
+
+        always_junk_subject_matches = _matches(
+            subject_text, self.rules.always_junk_subjects
+        )
+        if always_junk_subject_matches:
+            return Classification(
+                JUNK,
+                f"review preference: {', '.join(always_junk_subject_matches[:2])}",
             )
 
         always_forward_matches = _matches(sender_text, self.rules.always_forward_senders)
@@ -165,6 +175,7 @@ def rules_from_dict(data: dict[str, Any]) -> ClassifierRules:
         always_forward_senders=_tuple(data.get("always_forward_senders", [])),
         always_forward_subjects=_tuple(data.get("always_forward_subjects", [])),
         always_junk_senders=_tuple(data.get("always_junk_senders", [])),
+        always_junk_subjects=_tuple(data.get("always_junk_subjects", [])),
         ignore_patterns=tuple(
             SenderSubjectRule(
                 sender=str(rule.get("sender", "")).lower(),
