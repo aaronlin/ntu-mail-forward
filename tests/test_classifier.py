@@ -56,6 +56,16 @@ class ClassifierTest(unittest.TestCase):
         )
         self.assertEqual(result.decision, JUNK)
 
+    def test_japanese_points_giveaway_campaign_is_junk(self) -> None:
+        result = classify_message(
+            message(
+                "campaign@example.com",
+                "【最大8,000円分】ポイントプレゼント",
+                headers={"List-Unsubscribe": "<mailto:unsubscribe@example.com>"},
+            )
+        )
+        self.assertEqual(result.decision, JUNK)
+
     def test_ambiguous_mail_forwards_by_default(self) -> None:
         result = classify_message(message("friend@example.com", "Following up"))
         self.assertEqual(result.decision, FORWARD)
