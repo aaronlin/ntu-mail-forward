@@ -107,7 +107,9 @@
     "mail@ifttt.com"
   ],
   "always_junk_subjects": [
-    "リクルートID"
+    "リクルートID",
+    "お問い合わせフォームよりメッセージ",
+    "certificate of origin/export documentation"
   ],
   "ignore_patterns": [
     {
