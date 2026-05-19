@@ -127,10 +127,26 @@ class ClassifierTest(unittest.TestCase):
         self.assertTrue(all(classify_message(msg).decision == JUNK for msg in samples))
 
     def test_reviewed_junk_subjects_are_junk(self) -> None:
-        result = classify_message(
-            message("info@point.recruit.co.jp", "リクルートID ログインのお知らせ")
-        )
-        self.assertEqual(result.decision, JUNK)
+        samples = [
+            message("info@point.recruit.co.jp", "リクルートID ログインのお知らせ"),
+            message(
+                "web@example.jp",
+                "大阪ローリングタートルお問い合わせフォームよりメッセージ",
+            ),
+            message(
+                "web@example.jp",
+                "東京ローリングタートルお問い合わせフォームよりメッセージ",
+            ),
+            message(
+                "agent@example.com",
+                "One-class Certificate of origin/export documentation agent",
+            ),
+            message(
+                "agent@example.com",
+                "Certificate of origin/export documentation service available",
+            ),
+        ]
+        self.assertTrue(all(classify_message(msg).decision == JUNK for msg in samples))
 
     def test_turbotax_uses_content_to_classify(self) -> None:
         self.assertEqual(
