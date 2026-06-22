@@ -83,6 +83,12 @@
     "synology",
     "quantopian",
     "hihibox",
+    "hanchor",
+    "streetvoice",
+    "songkick",
+    "padi",
+    "timberland",
+    "ubisoft",
     "hsbc taiwan",
     "jr九州",
     "jrkyushu",
@@ -109,7 +115,8 @@
   "always_junk_subjects": [
     "リクルートID",
     "お問い合わせフォームよりメッセージ",
-    "certificate of origin/export documentation"
+    "certificate of origin/export documentation",
+    "[cfp] 14th international workshop on assistive computer vision and robotics"
   ],
   "ignore_patterns": [
     {

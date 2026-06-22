@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from pathlib import Path
@@ -107,16 +108,22 @@ class Classifier:
                 f"review preference: {', '.join(always_forward_subject_matches[:2])}",
             )
 
-        important_matches = _matches(header_text, self.rules.important_header_terms)
+        junk_matches = _matches(searchable, self.rules.junk_terms)
+        bulk_matches = self._bulk_matches(message)
+        promo_matches = _matches(sender.lower(), self.rules.promo_senders)
+        if promo_matches and bulk_matches:
+            reasons = promo_matches[:1] + bulk_matches[:2]
+            return Classification(JUNK, f"promotional bulk sender: {', '.join(reasons)}")
+
+        important_matches = _header_term_matches(
+            header_text, self.rules.important_header_terms
+        )
         if important_matches:
             return Classification(
                 FORWARD,
                 f"important cue: {', '.join(important_matches[:3])}",
             )
 
-        junk_matches = _matches(searchable, self.rules.junk_terms)
-        bulk_matches = self._bulk_matches(message)
-        promo_matches = _matches(sender.lower(), self.rules.promo_senders)
         if junk_matches and (bulk_matches or promo_matches):
             reasons = junk_matches[:2] + bulk_matches[:2] + promo_matches[:1]
             return Classification(JUNK, f"high-confidence junk: {', '.join(reasons)}")
@@ -211,6 +218,21 @@ def _header(message: EmailMessage, name: str) -> str:
 
 def _matches(text: str, terms: tuple[str, ...]) -> list[str]:
     return [term for term in terms if term in text]
+
+
+def _header_term_matches(text: str, terms: tuple[str, ...]) -> list[str]:
+    return [term for term in terms if _header_term_match(text, term)]
+
+
+def _header_term_match(text: str, term: str) -> bool:
+    if not _is_ascii_word_phrase(term):
+        return term in text
+    pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+    return re.search(pattern, text) is not None
+
+
+def _is_ascii_word_phrase(term: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9]+(?: [a-z0-9]+)*", term))
 
 
 def _body_text(message: EmailMessage) -> str:
