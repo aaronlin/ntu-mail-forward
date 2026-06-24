@@ -80,6 +80,35 @@ class ClassifierTest(unittest.TestCase):
         )
         self.assertEqual(result.decision, FORWARD)
 
+    def test_important_header_terms_are_token_aware(self) -> None:
+        result = classify_message(
+            message(
+                "Intuit <do_not_reply@intuit.com>",
+                "A passkey was added to your Intuit Account",
+            )
+        )
+        self.assertNotIn("important cue: ntu", result.reason)
+
+    def test_promo_bulk_sender_does_not_forward_on_embedded_important_terms(self) -> None:
+        samples = [
+            message(
+                "Quantopian Newsletter <feedback@quantopian.com>",
+                "Factor Momentum Across Industries***Marketing***",
+                headers={"List-Unsubscribe": "<mailto:unsubscribe@example.com>"},
+            ),
+            message(
+                "Packt <packt@mail.packtpub.com>",
+                "The AI Security Workshop Everyone's Talking About",
+                headers={"List-Unsubscribe": "<mailto:unsubscribe@example.com>"},
+            ),
+            message(
+                '"Booking.com" <email.campaign@sg.booking.com>',
+                "Summer's calling - find great deals on flights",
+                headers={"List-Unsubscribe": "<mailto:unsubscribe@example.com>"},
+            ),
+        ]
+        self.assertTrue(all(classify_message(msg).decision == JUNK for msg in samples))
+
     def test_initium_is_not_junk(self) -> None:
         result = classify_message(
             message("端周報 Initium Weekly <membership@theinitium.com>", "白宮槍響驚雲")
@@ -145,8 +174,20 @@ class ClassifierTest(unittest.TestCase):
                 "agent@example.com",
                 "Certificate of origin/export documentation service available",
             ),
+            message(
+                "Image Processing Laboratory <iplab@dmi.unict.it>",
+                "[CFP] 14th International Workshop on Assistive Computer Vision and Robotics (ACVR 2026)",
+            ),
+            message(
+                '"Wu, Lizhao" <lw939@exeter.ac.uk>',
+                "CFP: International Conferences (IUCC, CIT, DSCI, IOI), UK, 26-28 October 2026",
+            ),
         ]
         self.assertTrue(all(classify_message(msg).decision == JUNK for msg in samples))
+
+    def test_cfp_subject_group_requires_conference_or_workshop(self) -> None:
+        result = classify_message(message("editor@example.com", "CFP: submit your article"))
+        self.assertEqual(result.decision, FORWARD)
 
     def test_turbotax_uses_content_to_classify(self) -> None:
         self.assertEqual(

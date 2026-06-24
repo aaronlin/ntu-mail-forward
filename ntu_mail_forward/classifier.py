@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from pathlib import Path
@@ -29,6 +30,13 @@ class SenderSubjectRule:
 
 
 @dataclass(frozen=True)
+class SubjectTermGroupRule:
+    all_terms: tuple[str, ...] = ()
+    any_terms: tuple[str, ...] = ()
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class SenderContentRule:
     sender: str
     forward_subject_terms: tuple[str, ...] = ()
@@ -47,6 +55,7 @@ class ClassifierRules:
     always_forward_subjects: tuple[str, ...] = ()
     always_junk_senders: tuple[str, ...] = ()
     always_junk_subjects: tuple[str, ...] = ()
+    always_junk_subject_groups: tuple[SubjectTermGroupRule, ...] = ()
     ignore_patterns: tuple[SenderSubjectRule, ...] = ()
     sender_content_rules: tuple[SenderContentRule, ...] = ()
     bulk_headers: tuple[str, ...] = ()
@@ -91,6 +100,10 @@ class Classifier:
                 f"review preference: {', '.join(always_junk_subject_matches[:2])}",
             )
 
+        always_junk_subject_group_reason = self._subject_group_reason(subject_text)
+        if always_junk_subject_group_reason:
+            return Classification(JUNK, always_junk_subject_group_reason)
+
         always_forward_matches = _matches(sender_text, self.rules.always_forward_senders)
         if always_forward_matches:
             return Classification(
@@ -107,16 +120,22 @@ class Classifier:
                 f"review preference: {', '.join(always_forward_subject_matches[:2])}",
             )
 
-        important_matches = _matches(header_text, self.rules.important_header_terms)
+        junk_matches = _matches(searchable, self.rules.junk_terms)
+        bulk_matches = self._bulk_matches(message)
+        promo_matches = _matches(sender.lower(), self.rules.promo_senders)
+        if promo_matches and bulk_matches:
+            reasons = promo_matches[:1] + bulk_matches[:2]
+            return Classification(JUNK, f"promotional bulk sender: {', '.join(reasons)}")
+
+        important_matches = _header_term_matches(
+            header_text, self.rules.important_header_terms
+        )
         if important_matches:
             return Classification(
                 FORWARD,
                 f"important cue: {', '.join(important_matches[:3])}",
             )
 
-        junk_matches = _matches(searchable, self.rules.junk_terms)
-        bulk_matches = self._bulk_matches(message)
-        promo_matches = _matches(sender.lower(), self.rules.promo_senders)
         if junk_matches and (bulk_matches or promo_matches):
             reasons = junk_matches[:2] + bulk_matches[:2] + promo_matches[:1]
             return Classification(JUNK, f"high-confidence junk: {', '.join(reasons)}")
@@ -144,6 +163,16 @@ class Classifier:
                 return Classification(JUNK, rule.junk_reason)
             return Classification(FORWARD, rule.uncertain_reason)
         return None
+
+    def _subject_group_reason(self, subject: str) -> str:
+        for rule in self.rules.always_junk_subject_groups:
+            if not all(term in subject for term in rule.all_terms):
+                continue
+            if rule.any_terms and not any(term in subject for term in rule.any_terms):
+                continue
+            terms = list(rule.all_terms) + list(rule.any_terms[:1])
+            return rule.reason or f"review preference: {', '.join(terms)}"
+        return ""
 
     def _bulk_matches(self, message: EmailMessage) -> list[str]:
         matches: list[str] = []
@@ -176,6 +205,14 @@ def rules_from_dict(data: dict[str, Any]) -> ClassifierRules:
         always_forward_subjects=_tuple(data.get("always_forward_subjects", [])),
         always_junk_senders=_tuple(data.get("always_junk_senders", [])),
         always_junk_subjects=_tuple(data.get("always_junk_subjects", [])),
+        always_junk_subject_groups=tuple(
+            SubjectTermGroupRule(
+                all_terms=_tuple(rule.get("all", [])),
+                any_terms=_tuple(rule.get("any", [])),
+                reason=str(rule.get("reason", "")),
+            )
+            for rule in data.get("always_junk_subject_groups", [])
+        ),
         ignore_patterns=tuple(
             SenderSubjectRule(
                 sender=str(rule.get("sender", "")).lower(),
@@ -211,6 +248,21 @@ def _header(message: EmailMessage, name: str) -> str:
 
 def _matches(text: str, terms: tuple[str, ...]) -> list[str]:
     return [term for term in terms if term in text]
+
+
+def _header_term_matches(text: str, terms: tuple[str, ...]) -> list[str]:
+    return [term for term in terms if _header_term_match(text, term)]
+
+
+def _header_term_match(text: str, term: str) -> bool:
+    if not _is_ascii_word_phrase(term):
+        return term in text
+    pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+    return re.search(pattern, text) is not None
+
+
+def _is_ascii_word_phrase(term: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9]+(?: [a-z0-9]+)*", term))
 
 
 def _body_text(message: EmailMessage) -> str:

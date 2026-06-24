@@ -83,6 +83,12 @@
     "synology",
     "quantopian",
     "hihibox",
+    "hanchor",
+    "streetvoice",
+    "songkick",
+    "padi",
+    "timberland",
+    "ubisoft",
     "hsbc taiwan",
     "jr九州",
     "jrkyushu",
@@ -110,6 +116,18 @@
     "リクルートID",
     "お問い合わせフォームよりメッセージ",
     "certificate of origin/export documentation"
+  ],
+  "always_junk_subject_groups": [
+    {
+      "all": [
+        "cfp"
+      ],
+      "any": [
+        "conference",
+        "workshop"
+      ],
+      "reason": "review preference: CFP conference/workshop mail"
+    }
   ],
   "ignore_patterns": [
     {
