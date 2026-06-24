@@ -185,6 +185,10 @@ class ClassifierTest(unittest.TestCase):
         ]
         self.assertTrue(all(classify_message(msg).decision == JUNK for msg in samples))
 
+    def test_cfp_subject_group_requires_conference_or_workshop(self) -> None:
+        result = classify_message(message("editor@example.com", "CFP: submit your article"))
+        self.assertEqual(result.decision, FORWARD)
+
     def test_turbotax_uses_content_to_classify(self) -> None:
         self.assertEqual(
             classify_message(

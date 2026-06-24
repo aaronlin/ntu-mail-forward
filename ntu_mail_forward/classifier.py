@@ -30,6 +30,13 @@ class SenderSubjectRule:
 
 
 @dataclass(frozen=True)
+class SubjectTermGroupRule:
+    all_terms: tuple[str, ...] = ()
+    any_terms: tuple[str, ...] = ()
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class SenderContentRule:
     sender: str
     forward_subject_terms: tuple[str, ...] = ()
@@ -48,6 +55,7 @@ class ClassifierRules:
     always_forward_subjects: tuple[str, ...] = ()
     always_junk_senders: tuple[str, ...] = ()
     always_junk_subjects: tuple[str, ...] = ()
+    always_junk_subject_groups: tuple[SubjectTermGroupRule, ...] = ()
     ignore_patterns: tuple[SenderSubjectRule, ...] = ()
     sender_content_rules: tuple[SenderContentRule, ...] = ()
     bulk_headers: tuple[str, ...] = ()
@@ -91,6 +99,10 @@ class Classifier:
                 JUNK,
                 f"review preference: {', '.join(always_junk_subject_matches[:2])}",
             )
+
+        always_junk_subject_group_reason = self._subject_group_reason(subject_text)
+        if always_junk_subject_group_reason:
+            return Classification(JUNK, always_junk_subject_group_reason)
 
         always_forward_matches = _matches(sender_text, self.rules.always_forward_senders)
         if always_forward_matches:
@@ -152,6 +164,16 @@ class Classifier:
             return Classification(FORWARD, rule.uncertain_reason)
         return None
 
+    def _subject_group_reason(self, subject: str) -> str:
+        for rule in self.rules.always_junk_subject_groups:
+            if not all(term in subject for term in rule.all_terms):
+                continue
+            if rule.any_terms and not any(term in subject for term in rule.any_terms):
+                continue
+            terms = list(rule.all_terms) + list(rule.any_terms[:1])
+            return rule.reason or f"review preference: {', '.join(terms)}"
+        return ""
+
     def _bulk_matches(self, message: EmailMessage) -> list[str]:
         matches: list[str] = []
         for name in self.rules.bulk_headers:
@@ -183,6 +205,14 @@ def rules_from_dict(data: dict[str, Any]) -> ClassifierRules:
         always_forward_subjects=_tuple(data.get("always_forward_subjects", [])),
         always_junk_senders=_tuple(data.get("always_junk_senders", [])),
         always_junk_subjects=_tuple(data.get("always_junk_subjects", [])),
+        always_junk_subject_groups=tuple(
+            SubjectTermGroupRule(
+                all_terms=_tuple(rule.get("all", [])),
+                any_terms=_tuple(rule.get("any", [])),
+                reason=str(rule.get("reason", "")),
+            )
+            for rule in data.get("always_junk_subject_groups", [])
+        ),
         ignore_patterns=tuple(
             SenderSubjectRule(
                 sender=str(rule.get("sender", "")).lower(),
