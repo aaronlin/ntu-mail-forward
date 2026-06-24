@@ -178,6 +178,10 @@ class ClassifierTest(unittest.TestCase):
                 "Image Processing Laboratory <iplab@dmi.unict.it>",
                 "[CFP] 14th International Workshop on Assistive Computer Vision and Robotics (ACVR 2026)",
             ),
+            message(
+                '"Wu, Lizhao" <lw939@exeter.ac.uk>',
+                "CFP: International Conferences (IUCC, CIT, DSCI, IOI), UK, 26-28 October 2026",
+            ),
         ]
         self.assertTrue(all(classify_message(msg).decision == JUNK for msg in samples))
 
