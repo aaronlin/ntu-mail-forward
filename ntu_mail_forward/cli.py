@@ -253,11 +253,17 @@ def audit_forward(
                     delete_after,
                 )
                 if classification.decision == FORWARD:
-                    if smtp is None:
-                        smtp = connect_smtp(account)
-                    smtp.send_message(build_forward(original, account))
-                    record.forwarded_at = utc_now()
-                    print(f"Forwarded: {describe_message(number, uid, original)}")
+                    duplicate_reason = _duplicate_forward_reason(record, state)
+                    if duplicate_reason:
+                        record.decision = JUNK
+                        record.reason = duplicate_reason
+                        print(f"Duplicate retained: {describe_message(number, uid, original)}")
+                    else:
+                        if smtp is None:
+                            smtp = connect_smtp(account)
+                        smtp.send_message(build_forward(original, account))
+                        record.forwarded_at = utc_now()
+                        print(f"Forwarded: {describe_message(number, uid, original)}")
                 elif classification.decision == JUNK:
                     print(f"Junk retained: {describe_message(number, uid, original)}")
                 else:
@@ -357,6 +363,27 @@ def _record_from_message(
         processed_at=processed_at,
         delete_after=delete_after,
     )
+
+
+def _duplicate_forward_reason(record: MailRecord, state) -> str:
+    fingerprint = _forward_fingerprint(record)
+    if fingerprint is None:
+        return ""
+    for existing in state.records.values():
+        if existing.decision != FORWARD or not existing.forwarded_at:
+            continue
+        if _forward_fingerprint(existing) == fingerprint:
+            return "duplicate of previously forwarded message"
+    return ""
+
+
+def _forward_fingerprint(record: MailRecord) -> tuple[str, str, str] | None:
+    sender = record.sender.strip().lower()
+    subject = record.subject.strip().lower()
+    date = record.date.strip().lower()
+    if not sender or not subject or not date:
+        return None
+    return sender, subject, date
 
 
 def append_audit_csv(path: Path, rows: list[MailRecord]) -> None:

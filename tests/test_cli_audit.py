@@ -127,6 +127,58 @@ class AuditForwardIntegrationTest(unittest.TestCase):
         self.assertEqual(smtp.sent, [])
         self.assertEqual(pop3.deleted, [])
 
+    def test_audit_forward_retains_duplicate_forward_with_new_uid(self) -> None:
+        original_date = "Fri, 03 Jul 2026 12:02:28 +0000"
+        duplicate = make_message(
+            "Giloo 紀實影音 <edm@giloo.ist>",
+            "深夜病房裡，所有狀況同時發生",
+        )
+        duplicate["Date"] = original_date
+        pop3 = FakePOP3({2: duplicate})
+        smtp = FakeSMTP()
+        state = MailState(
+            records={
+                "old-uid": MailRecord(
+                    uid="old-uid",
+                    sender="Giloo 紀實影音 <edm@giloo.ist>",
+                    subject="深夜病房裡，所有狀況同時發生",
+                    date=original_date,
+                    decision="forward",
+                    forwarded_at="2026-07-03T12:05:00+00:00",
+                )
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "ntu_mail_forward.cli.connect_smtp", return_value=smtp
+        ), patch.dict(
+            os.environ,
+            {"NTU_MAIL_USER": "b92901058", "NTU_FORWARD_TO": "gmail@example.com"},
+            clear=True,
+        ):
+            state_file = Path(tmp) / "state.json"
+            audit_csv = Path(tmp) / "audit.csv"
+            with redirect_stdout(StringIO()):
+                code = audit_forward(
+                    pop3,
+                    {2: "new-uid"},
+                    state,
+                    state_file,
+                    audit_csv,
+                    limit=None,
+                    retention_days=30,
+                    classifier=Classifier(load_rules()),
+                )
+            saved = load_state(state_file)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(smtp.sent, [])
+        self.assertEqual(saved.records["new-uid"].decision, "junk")
+        self.assertEqual(
+            saved.records["new-uid"].reason,
+            "duplicate of previously forwarded message",
+        )
+
     def test_cleanup_expired_deletes_only_expired_and_skips_missing_uidls(self) -> None:
         now = datetime.now(timezone.utc)
         expired = (now - timedelta(days=1)).isoformat()
