@@ -7,6 +7,7 @@ import smtplib
 import sys
 from collections import Counter
 from contextlib import redirect_stdout
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from io import StringIO
@@ -29,6 +30,7 @@ from .mailbox import (
 )
 from .state import (
     MailRecord,
+    MailState,
     load_state,
     save_seen_uids,
     save_state,
@@ -143,6 +145,8 @@ def run_single_account(args: argparse.Namespace, account: AccountConfig) -> int:
 
     state = load_state(state_file)
     pop3 = connect_pop3(account)
+    if args.cleanup_expired:
+        return cleanup_expired(pop3, state, state_file, audit_csv)
     try:
         uid_map = fetch_uid_map(pop3)
         current_uids = set(uid_map.values())
@@ -151,9 +155,6 @@ def run_single_account(args: argparse.Namespace, account: AccountConfig) -> int:
             save_seen_uids(state_file, current_uids)
             print(f"Initialized state with {len(current_uids)} existing message(s).")
             return 0
-
-        if args.cleanup_expired:
-            return cleanup_expired(pop3, uid_map, state, state_file, audit_csv)
 
         if args.audit_forward:
             rules_file = (
@@ -170,8 +171,8 @@ def run_single_account(args: argparse.Namespace, account: AccountConfig) -> int:
                 audit_csv,
                 args.limit,
                 args.retention_days,
-                classifier,
                 account,
+                classifier,
             )
 
         unseen_items = [
@@ -209,13 +210,13 @@ def run_single_account(args: argparse.Namespace, account: AccountConfig) -> int:
 def audit_forward(
     pop3: poplib.POP3_SSL,
     uid_map: dict[int, str],
-    state,
+    state: MailState,
     state_file: Path,
     audit_csv: Path,
     limit: int | None,
     retention_days: int,
+    account: AccountConfig,
     classifier: Classifier | None = None,
-    account: AccountConfig | None = None,
 ) -> int:
     items = [
         (number, uid)
@@ -232,7 +233,6 @@ def audit_forward(
 
     classifier = classifier or Classifier()
     smtp = None
-    rows: list[MailRecord] = []
     counts: Counter[str] = Counter(skipped=skipped)
     try:
         for number, uid in items:
@@ -282,7 +282,6 @@ def audit_forward(
                 print(f"Error processing #{number} ({uid}): {exc}")
 
             state.records[uid] = record
-            rows.append(record)
             counts[record.decision] += 1
             save_state(state_file, state)
             append_audit_csv(audit_csv, [record])
@@ -301,36 +300,45 @@ def audit_forward(
 
 def cleanup_expired(
     pop3: poplib.POP3_SSL,
-    uid_map: dict[int, str],
-    state,
+    state: MailState,
     state_file: Path,
     audit_csv: Path,
 ) -> int:
-    uid_to_number = {uid: number for number, uid in uid_map.items()}
     now = datetime.now(timezone.utc)
     rows: list[MailRecord] = []
     counts: Counter[str] = Counter()
 
-    for uid, record in sorted(state.records.items()):
-        if record.deleted_at or not record.delete_after:
-            continue
-        delete_after = _parse_datetime(record.delete_after)
-        if delete_after is None or delete_after > now:
-            continue
-        number = uid_to_number.get(uid)
-        if number is None:
-            record.deleted_at = utc_now()
-            record.error = "UID not present during cleanup; treated as already gone"
-            counts["missing"] += 1
-            rows.append(record)
-            continue
-        pop3.dele(number)
-        record.deleted_at = utc_now()
-        record.message_number = number
-        counts["deleted"] += 1
-        rows.append(record)
-        print(f"Deleted expired POP3 message #{number} ({uid})")
+    try:
+        uid_to_number = {uid: number for number, uid in fetch_uid_map(pop3).items()}
+        for uid, record in sorted(state.records.items()):
+            if record.deleted_at or not record.delete_after:
+                continue
+            delete_after = _parse_datetime(record.delete_after)
+            if delete_after is None or delete_after > now:
+                continue
+            number = uid_to_number.get(uid)
+            if number is None:
+                rows.append(
+                    replace(
+                        record,
+                        deleted_at=utc_now(),
+                        error="UID not present during cleanup; treated as already gone",
+                    )
+                )
+                counts["missing"] += 1
+                continue
+            pop3.dele(number)
+            rows.append(replace(record, deleted_at=utc_now(), message_number=number))
+            counts["deleted"] += 1
+        pop3.quit()
+    except BaseException:
+        try:
+            pop3.close()
+        except Exception:
+            pass
+        raise
 
+    state.records.update({record.uid: record for record in rows})
     save_state(state_file, state)
     if rows:
         append_audit_csv(audit_csv, rows)
@@ -339,7 +347,6 @@ def cleanup_expired(
         f"deleted={counts['deleted']}, missing={counts['missing']}, "
         f"retained={len(state.records) - counts['deleted'] - counts['missing']}"
     )
-    print("POP3 deletes commit on QUIT.")
     return 0
 
 
@@ -365,7 +372,7 @@ def _record_from_message(
     )
 
 
-def _duplicate_forward_reason(record: MailRecord, state) -> str:
+def _duplicate_forward_reason(record: MailRecord, state: MailState) -> str:
     fingerprint = _forward_fingerprint(record)
     if fingerprint is None:
         return ""

@@ -28,10 +28,6 @@ class MailState:
     updated_at: str = ""
 
 
-def load_seen_uids(path: Path) -> set[str]:
-    return set(load_state(path).records)
-
-
 def save_seen_uids(path: Path, seen_uids: set[str]) -> None:
     now = utc_now()
     state = MailState(

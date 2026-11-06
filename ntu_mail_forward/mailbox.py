@@ -10,48 +10,29 @@ from email.parser import BytesHeaderParser
 from email.policy import default
 
 from .config import AccountConfig
-from .config import env, optional_env
 
 
-def connect_pop3(account: AccountConfig | None = None) -> poplib.POP3_SSL:
-    if account is None:
-        host = env("NTU_POP3_HOST", "msa.ntu.edu.tw")
-        port = int(env("NTU_POP3_PORT", "995"))
-        username = env("NTU_MAIL_USER")
-        password = env("NTU_MAIL_PASSWORD")
-    else:
-        host = account.pop3_host
-        port = account.pop3_port
-        username = account.mail_user
-        password = account.mail_password
-
+def connect_pop3(account: AccountConfig) -> poplib.POP3_SSL:
     context = ssl.create_default_context()
-    pop3 = poplib.POP3_SSL(host, port, context=context, timeout=30)
+    pop3 = poplib.POP3_SSL(
+        account.pop3_host, account.pop3_port, context=context, timeout=30
+    )
     try:
-        pop3.user(username)
-        pop3.pass_(password)
+        pop3.user(account.mail_user)
+        pop3.pass_(account.mail_password)
     except Exception:
         pop3.quit()
         raise
     return pop3
 
 
-def connect_smtp(account: AccountConfig | None = None) -> smtplib.SMTP_SSL:
-    if account is None:
-        username = env("NTU_MAIL_USER")
-        password = env("NTU_MAIL_PASSWORD")
-        host = env("NTU_SMTP_HOST", "smtps.ntu.edu.tw")
-        port = int(env("NTU_SMTP_PORT", "465"))
-    else:
-        username = account.mail_user
-        password = account.mail_password
-        host = account.smtp_host
-        port = account.smtp_port
-
+def connect_smtp(account: AccountConfig) -> smtplib.SMTP_SSL:
     context = ssl.create_default_context()
-    smtp = smtplib.SMTP_SSL(host, port, context=context, timeout=30)
+    smtp = smtplib.SMTP_SSL(
+        account.smtp_host, account.smtp_port, context=context, timeout=30
+    )
     try:
-        smtp.login(username, password)
+        smtp.login(account.mail_user, account.mail_password)
     except Exception:
         smtp.quit()
         raise
@@ -89,22 +70,11 @@ def describe_message(message_number: int, uid: str, msg: EmailMessage) -> str:
     return f"#{message_number} | {date} | {sender} | {subject} | {message_id}"
 
 
-def build_forward(original: EmailMessage, account: AccountConfig | None = None) -> EmailMessage:
-    if account is None:
-        username = env("NTU_MAIL_USER")
-        recipient = optional_env("NTU_FORWARD_TO")
-        sender = optional_env("NTU_FORWARD_FROM") or _default_sender(username)
-    else:
-        username = account.mail_user
-        recipient = account.forward_to
-        sender = account.forward_from or _default_sender(username)
-    if not recipient:
-        raise SystemExit("Missing required environment variable: NTU_FORWARD_TO")
-
+def build_forward(original: EmailMessage, account: AccountConfig) -> EmailMessage:
     original_subject = str(original.get("Subject", "(no subject)"))
     forwarded = EmailMessage()
-    forwarded["From"] = sender
-    forwarded["To"] = recipient
+    forwarded["From"] = account.forward_from or _default_sender(account.mail_user)
+    forwarded["To"] = account.forward_to
     forwarded["Subject"] = f"Fwd: {original_subject}"
     forwarded.set_content(_forwarded_plain_text(original, original_subject))
 

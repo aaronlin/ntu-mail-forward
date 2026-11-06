@@ -28,13 +28,13 @@ cat "$stderr_tmp" >>"$stderr_log"
 
 if [ "$command_status" -ne 0 ]; then
   notify_tmp="$(mktemp "${TMPDIR:-/tmp}/ntu-mail-forward-notify.XXXXXX")"
-  "$1" -m ntu_mail_forward.notify_error \
+  (cd "$repo_root" && "$1" -m ntu_mail_forward.notify_error \
     --job-name "$job_name" \
     --command "$*" \
     --exit-code "$command_status" \
     --stdout-file "$stdout_tmp" \
     --stderr-file "$stderr_tmp" \
-    --cwd "$repo_root" >"$notify_tmp" 2>&1
+    --cwd "$repo_root") >"$notify_tmp" 2>&1
   notify_status="$?"
   cat "$notify_tmp" >>"$stderr_log"
   rm -f -- "$notify_tmp"
