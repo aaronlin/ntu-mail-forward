@@ -7,10 +7,10 @@ forwards important or uncertain messages to Gmail through NTU SMTP, records the
 processing decision, and only deletes retained originals after their retention
 window expires.
 
-The code is intentionally dependency-light. Runtime settings are read from YAML,
-so the Python used to run the app must have PyYAML available. There is no
-package manager metadata yet, so run commands from the repository root and
-invoke modules directly with `python3 -m ...`.
+The code is intentionally dependency-light. uv manages Python 3.12 and the
+PyYAML dependency through `pyproject.toml`, `.python-version`, and `uv.lock`.
+Run `uv sync --locked` from the repository root, then invoke modules with
+`uv run python -m ...`.
 
 ## Repository Layout
 
@@ -41,8 +41,10 @@ invoke modules directly with `python3 -m ...`.
 - The installed LaunchAgents in `~/Library/LaunchAgents/` should be symlinks to
   the real plist files under `launchd/`, not copied files. This keeps local
   launchd config in sync with repo edits.
-- The local plist files use `/Users/aaron_lin/opt/anaconda3/bin/python3`
-  because `/usr/bin/python3` does not have PyYAML installed.
+- Generate and register both jobs with
+  `uv run python -m ntu_mail_forward.launchd_setup`. The installer resolves the
+  repository path and uses `.venv/bin/python`; keep user names and machine paths
+  out of tracked templates. Use `--render-only` to generate without registration.
 - After changing loaded plist content, reload or kickstart the relevant
   LaunchAgent if the running launchd job needs to pick up the change
   immediately.
@@ -57,26 +59,28 @@ invoke modules directly with `python3 -m ...`.
 - `--cleanup-expired` is the only mode that should delete POP3 messages, and it
   should delete only messages whose recorded `delete_after` has passed.
 - POP3 deletes commit when `quit()` is called. Be careful with exception paths
-  and tests around cleanup.
+  and tests around cleanup. `cleanup_expired` owns its POP3 connection and must
+  confirm `QUIT` before saving deletion records. Abort failed cleanup sessions
+  with `close()`, without committing pending deletes.
 - The classifier should bias toward forwarding uncertain messages to avoid false
   negatives.
 
 ## Development Commands
 
 - Preview mailbox headers without state changes:
-  `python3 -m ntu_mail_forward.cli --dry-run`
+  `uv run python -m ntu_mail_forward.cli --dry-run`
 - Mark current mailbox contents as already processed:
-  `python3 -m ntu_mail_forward.cli --init`
+  `uv run python -m ntu_mail_forward.cli --init`
 - Audit and forward unprocessed mail:
-  `python3 -m ntu_mail_forward.cli --audit-forward`
+  `uv run python -m ntu_mail_forward.cli --audit-forward`
 - Run cleanup:
-  `python3 -m ntu_mail_forward.cli --cleanup-expired`
+  `uv run python -m ntu_mail_forward.cli --cleanup-expired`
 - Run the local test suite:
-  `python3 -m unittest discover -s tests`
+  `uv run python -m unittest discover -s tests`
 - Probe live POP3 credentials:
-  `python3 tests/probe_pop3_smtp.py`
+  `uv run python tests/probe_pop3_smtp.py`
 - Probe live SMTP credentials too:
-  `NTU_TEST_SMTP=1 python3 tests/probe_pop3_smtp.py`
+  `NTU_TEST_SMTP=1 uv run python tests/probe_pop3_smtp.py`
 
 ## Testing Guidance
 

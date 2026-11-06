@@ -1,6 +1,7 @@
 .env.local
 settings.yaml
 .local/
+.venv/
 launchd/com.personal-automation.ntu-mail-forward.plist
 launchd/com.personal-automation.ntu-mail-forward-cleanup.plist
 __pycache__/

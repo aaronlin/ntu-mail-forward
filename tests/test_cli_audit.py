@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import json
 import tempfile
 import unittest
@@ -14,12 +13,16 @@ from unittest.mock import patch
 
 from ntu_mail_forward.cli import audit_forward, cleanup_expired, run
 from ntu_mail_forward.classifier import Classifier, load_rules
+from ntu_mail_forward.config import AccountConfig
 from ntu_mail_forward.state import MailRecord, MailState, load_state
 
 
 class FakePOP3:
-    def __init__(self, messages: dict[int, EmailMessage]) -> None:
+    def __init__(
+        self, messages: dict[int, EmailMessage], uid_map: dict[int, str] | None = None
+    ) -> None:
         self.messages = messages
+        self.uid_map = uid_map or {}
         self.deleted: list[int] = []
 
     def retr(self, number: int) -> tuple[bytes, list[bytes], int]:
@@ -33,6 +36,13 @@ class FakePOP3:
     def dele(self, number: int) -> tuple[bytes, list[bytes], int]:
         self.deleted.append(number)
         return b"+OK", [], 0
+
+    def uidl(self) -> tuple[bytes, list[bytes], int]:
+        lines = [f"{number} {uid}".encode() for number, uid in self.uid_map.items()]
+        return b"+OK", lines, 0
+
+    def close(self) -> None:
+        pass
 
     def quit(self) -> None:
         pass
@@ -59,6 +69,12 @@ def make_message(sender: str, subject: str, body: str = "") -> EmailMessage:
 
 
 class AuditForwardIntegrationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.account = AccountConfig(
+            name="synthetic", mail_user="synthetic", mail_password="synthetic",
+            forward_to="gmail@example.com",
+        )
+
     def test_audit_forward_sends_only_forward_messages_and_never_deletes(self) -> None:
         pop3 = FakePOP3(
             {
@@ -72,10 +88,6 @@ class AuditForwardIntegrationTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, patch(
             "ntu_mail_forward.cli.connect_smtp", return_value=smtp
-        ), patch.dict(
-            os.environ,
-            {"NTU_MAIL_USER": "b92901058", "NTU_FORWARD_TO": "gmail@example.com"},
-            clear=True,
         ):
             state_file = Path(tmp) / "state.json"
             audit_csv = Path(tmp) / "audit.csv"
@@ -86,10 +98,11 @@ class AuditForwardIntegrationTest(unittest.TestCase):
                     MailState(records={}),
                     state_file,
                     audit_csv,
-                limit=None,
-                retention_days=30,
-                classifier=Classifier(load_rules()),
-            )
+                    limit=None,
+                    retention_days=30,
+                    classifier=Classifier(load_rules()),
+                    account=self.account,
+                )
             state = load_state(state_file)
             audit_csv_exists = audit_csv.exists()
             audit_rows = audit_csv.read_text(encoding="utf-8").splitlines()
@@ -121,6 +134,7 @@ class AuditForwardIntegrationTest(unittest.TestCase):
                     limit=None,
                     retention_days=30,
                     classifier=Classifier(load_rules()),
+                    account=self.account,
                 )
 
         self.assertEqual(code, 0)
@@ -151,10 +165,6 @@ class AuditForwardIntegrationTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, patch(
             "ntu_mail_forward.cli.connect_smtp", return_value=smtp
-        ), patch.dict(
-            os.environ,
-            {"NTU_MAIL_USER": "b92901058", "NTU_FORWARD_TO": "gmail@example.com"},
-            clear=True,
         ):
             state_file = Path(tmp) / "state.json"
             audit_csv = Path(tmp) / "audit.csv"
@@ -168,6 +178,7 @@ class AuditForwardIntegrationTest(unittest.TestCase):
                     limit=None,
                     retention_days=30,
                     classifier=Classifier(load_rules()),
+                    account=self.account,
                 )
             saved = load_state(state_file)
 
@@ -190,14 +201,14 @@ class AuditForwardIntegrationTest(unittest.TestCase):
                 "missing": MailRecord(uid="missing", decision="junk", delete_after=expired),
             }
         )
-        pop3 = FakePOP3({})
+        pop3 = FakePOP3({}, uid_map={3: "expired", 4: "future"})
 
         with tempfile.TemporaryDirectory() as tmp:
             state_file = Path(tmp) / "state.json"
             audit_csv = Path(tmp) / "audit.csv"
             with redirect_stdout(StringIO()):
                 code = cleanup_expired(
-                    pop3, {3: "expired", 4: "future"}, state, state_file, audit_csv
+                    pop3, state, state_file, audit_csv
                 )
             saved = load_state(state_file)
 
@@ -308,13 +319,13 @@ class AuditForwardIntegrationTest(unittest.TestCase):
                 "ntu_mail_forward.cli.parse_args", return_value=args
             ), patch(
                 "ntu_mail_forward.cli.connect_pop3",
-                side_effect=lambda account=None: pop3_by_account[account.name],
+                side_effect=lambda account: pop3_by_account[account.name],
             ), patch(
                 "ntu_mail_forward.cli.fetch_uid_map",
                 side_effect=lambda pop3: uid_maps[id(pop3)],
             ), patch(
                 "ntu_mail_forward.cli.connect_smtp",
-                side_effect=lambda account=None: smtp_by_account[account.name],
+                side_effect=lambda account: smtp_by_account[account.name],
             ), redirect_stdout(StringIO()):
                 code = run()
 
@@ -368,7 +379,7 @@ class AuditForwardIntegrationTest(unittest.TestCase):
             )
             working_pop3 = FakePOP3({})
 
-            def connect(account=None):
+            def connect(account):
                 if account.name == "broken":
                     raise OSError("login failed")
                 return working_pop3

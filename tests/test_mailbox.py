@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 import unittest
+from dataclasses import replace
 from email.message import EmailMessage
-from unittest.mock import patch
 
+from ntu_mail_forward.config import AccountConfig
 from ntu_mail_forward.mailbox import _default_sender, build_forward
 
 
@@ -17,6 +17,12 @@ class DefaultSenderTest(unittest.TestCase):
 
 
 class BuildForwardTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.account = AccountConfig(
+            name="synthetic", mail_user="student", mail_password="synthetic",
+            forward_to="gmail@example.com",
+        )
+
     def test_inlines_original_body_without_eml_attachment(self) -> None:
         original = EmailMessage()
         original["From"] = "sender@example.com"
@@ -25,15 +31,9 @@ class BuildForwardTest(unittest.TestCase):
         original["Subject"] = "Original subject"
         original.set_content("Hello from the original body.")
 
-        env = {
-            **os.environ,
-            "NTU_MAIL_USER": "b92901058",
-            "NTU_FORWARD_TO": "gmail@example.com",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            forwarded = build_forward(original)
+        forwarded = build_forward(original, self.account)
 
-        self.assertEqual(forwarded["From"], "b92901058@ntu.edu.tw")
+        self.assertEqual(forwarded["From"], "student@ntu.edu.tw")
         self.assertEqual(forwarded["To"], "gmail@example.com")
         self.assertEqual(forwarded["Subject"], "Fwd: Original subject")
         self.assertIn("Hello from the original body.", forwarded.get_content())
@@ -50,18 +50,30 @@ class BuildForwardTest(unittest.TestCase):
             filename="report.pdf",
         )
 
-        env = {
-            **os.environ,
-            "NTU_MAIL_USER": "b92901058",
-            "NTU_FORWARD_TO": "gmail@example.com",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            forwarded = build_forward(original)
+        forwarded = build_forward(original, self.account)
 
         attachments = list(forwarded.iter_attachments())
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0].get_filename(), "report.pdf")
         self.assertEqual(attachments[0].get_payload(decode=True), b"report-data")
+
+    def test_preserves_html_and_uses_configured_sender(self) -> None:
+        original = EmailMessage()
+        original["Subject"] = "Report <ready>"
+        original["From"] = "Sender <sender@example.com>"
+        original.set_content("Plain report.")
+        original.add_alternative("<p>HTML report.</p>", subtype="html")
+        account = replace(self.account, forward_from="custom@example.com")
+
+        forwarded = build_forward(original, account)
+
+        self.assertEqual(forwarded["From"], "custom@example.com")
+        self.assertEqual(forwarded["To"], "gmail@example.com")
+        self.assertIn("Plain report.", forwarded.get_body(preferencelist=("plain",)).get_content())
+        html = forwarded.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("<p>HTML report.</p>", html)
+        self.assertIn("Report &lt;ready&gt;", html)
+        self.assertIn("Sender &lt;sender@example.com&gt;", html)
 
 
 if __name__ == "__main__":
