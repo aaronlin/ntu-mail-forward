@@ -64,6 +64,8 @@ and term lists there for another mailbox, or point at a different rules file:
 uv run python -m ntu_mail_forward.cli --audit-forward --classifier-rules my-rules.json
 ```
 
+規則優先順序、通用規則與特例的取捨，以及離線驗證方式，見[分類規則說明](docs/classifier-rules.md)。
+
 ## Account settings
 
 `settings.yaml` is the default config for one or more NTU accounts. Each account
