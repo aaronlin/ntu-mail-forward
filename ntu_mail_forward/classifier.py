@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from email.message import EmailMessage
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +30,17 @@ class SenderSubjectRule:
     reason: str = ""
 
 
+class TermMatchMode(StrEnum):
+    SUBSTRING = "substring"
+    WORDS = "words"
+
+
 @dataclass(frozen=True)
 class SubjectTermGroupRule:
     all_terms: tuple[str, ...] = ()
     any_terms: tuple[str, ...] = ()
     reason: str = ""
+    match_mode: TermMatchMode = TermMatchMode.SUBSTRING
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,7 @@ class ClassifierRules:
     ignore_patterns: tuple[SenderSubjectRule, ...] = ()
     sender_content_rules: tuple[SenderContentRule, ...] = ()
     bulk_headers: tuple[str, ...] = ()
+    marketing_match_mode: TermMatchMode = TermMatchMode.SUBSTRING
 
 
 @dataclass
@@ -120,15 +128,19 @@ class Classifier:
                 f"review preference: {', '.join(always_forward_subject_matches[:2])}",
             )
 
-        junk_matches = _matches(searchable, self.rules.junk_terms)
+        junk_matches = _matches(
+            searchable, self.rules.junk_terms, self.rules.marketing_match_mode
+        )
         bulk_matches = self._bulk_matches(message)
-        promo_matches = _matches(sender.lower(), self.rules.promo_senders)
+        promo_matches = _matches(
+            sender_text, self.rules.promo_senders, self.rules.marketing_match_mode
+        )
         if promo_matches and bulk_matches:
             reasons = promo_matches[:1] + bulk_matches[:2]
             return Classification(JUNK, f"promotional bulk sender: {', '.join(reasons)}")
 
-        important_matches = _header_term_matches(
-            header_text, self.rules.important_header_terms
+        important_matches = _matches(
+            header_text, self.rules.important_header_terms, TermMatchMode.WORDS
         )
         if important_matches:
             return Classification(
@@ -166,9 +178,9 @@ class Classifier:
 
     def _subject_group_reason(self, subject: str) -> str:
         for rule in self.rules.always_junk_subject_groups:
-            if not all(term in subject for term in rule.all_terms):
+            if len(_matches(subject, rule.all_terms, rule.match_mode)) != len(rule.all_terms):
                 continue
-            if rule.any_terms and not any(term in subject for term in rule.any_terms):
+            if rule.any_terms and not _matches(subject, rule.any_terms, rule.match_mode):
                 continue
             terms = list(rule.all_terms) + list(rule.any_terms[:1])
             return rule.reason or f"review preference: {', '.join(terms)}"
@@ -178,10 +190,14 @@ class Classifier:
         matches: list[str] = []
         for name in self.rules.bulk_headers:
             value = str(message.get(name, ""))
+            if name == "precedence":
+                value = value.strip().lower()
+                if value not in {"bulk", "list", "junk"}:
+                    continue
             if value:
                 matches.append(name)
-            if name == "precedence" and value.lower() in {"bulk", "list", "junk"}:
-                matches.append(f"precedence:{value.lower()}")
+            if name == "precedence":
+                matches.append(f"precedence:{value}")
         return matches
 
 
@@ -210,6 +226,7 @@ def rules_from_dict(data: dict[str, Any]) -> ClassifierRules:
                 all_terms=_tuple(rule.get("all", [])),
                 any_terms=_tuple(rule.get("any", [])),
                 reason=str(rule.get("reason", "")),
+                match_mode=TermMatchMode(rule.get("match_mode", "substring")),
             )
             for rule in data.get("always_junk_subject_groups", [])
         ),
@@ -235,6 +252,7 @@ def rules_from_dict(data: dict[str, Any]) -> ClassifierRules:
             for rule in data.get("sender_content_rules", [])
         ),
         bulk_headers=_tuple(data.get("bulk_headers", [])),
+        marketing_match_mode=TermMatchMode(data.get("marketing_match_mode", "substring")),
     )
 
 
@@ -246,15 +264,17 @@ def _header(message: EmailMessage, name: str) -> str:
     return str(message.get(name, ""))
 
 
-def _matches(text: str, terms: tuple[str, ...]) -> list[str]:
+def _matches(
+    text: str,
+    terms: tuple[str, ...],
+    mode: TermMatchMode = TermMatchMode.SUBSTRING,
+) -> list[str]:
+    if mode == TermMatchMode.WORDS:
+        return [term for term in terms if _word_term_match(text, term)]
     return [term for term in terms if term in text]
 
 
-def _header_term_matches(text: str, terms: tuple[str, ...]) -> list[str]:
-    return [term for term in terms if _header_term_match(text, term)]
-
-
-def _header_term_match(text: str, term: str) -> bool:
+def _word_term_match(text: str, term: str) -> bool:
     if not _is_ascii_word_phrase(term):
         return term in text
     pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
