@@ -157,6 +157,7 @@ class ClassifierTest(unittest.TestCase):
 
     def test_reviewed_junk_subjects_are_junk(self) -> None:
         samples = [
+            message("newsletter@example.com", "天然保健专家：诚实可改善健康"),
             message("info@point.recruit.co.jp", "リクルートID ログインのお知らせ"),
             message(
                 "web@example.jp",
